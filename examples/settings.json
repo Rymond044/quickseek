@@ -1,0 +1,15 @@
+{
+  "width": 680,
+  "fonts": { "text": "Inter", "icons": "Symbols Nerd Font", "size": 11 },
+  "launchPrefix": ["uwsm", "app", "--"],
+  "web": {
+    "default": "ddg",
+    "engines": {
+      "ddg": { "name": "DuckDuckGo", "url": "https://duckduckgo.com/?q=%s" },
+      "gh": { "name": "GitHub", "url": "https://github.com/search?q=%s" }
+    }
+  },
+  "plugins": [
+    { "id": "cc", "name": "Control center", "icon": "󰒓", "command": ["~/.local/bin/my-settings-menu", "quickseek"] }
+  ]
+}
