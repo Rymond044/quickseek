@@ -3,6 +3,8 @@
 One search box for Hyprland, built on [Quickshell](https://quickshell.org): apps, your own settings
 menus (as plugins), a calculator, power actions and web search, in a small animated window.
 
+<p align="center"><img src="docs/media/demo.webp" width="736" alt="quickseek: apps, calculator, wrong layout, web, a plugin folder"></p>
+
 - Results grouped like a desktop spotlight: top hit, then Applications, plugin groups, Web.
 - Learns what you pick (frecency) and which item you pick for a query.
 - Typed in the wrong keyboard layout? `цфддзфзук` finds the same as `wallpaper` (ЙЦУКЕН ↔ QWERTY).
@@ -11,6 +13,17 @@ menus (as plugins), a calculator, power actions and web search, in a small anima
 - Plugins are plain executables speaking JSON Lines, see [docs/plugins.md](docs/plugins.md).
 - Runs as a daemon with no timers or polling: idle means zero CPU and no wakeups. The window is
   created on open and destroyed after it closes.
+
+## Screenshots
+
+| | |
+|:-:|:-:|
+| ![Applications](docs/media/apps.webp) | ![Plugins next to apps and system actions](docs/media/power.webp) |
+| Applications | Plugins next to apps and system actions |
+| ![Calculator](docs/media/calculator.webp) | ![Wrong keyboard layout](docs/media/layout.webp) |
+| Calculator and unit conversion | Wrong keyboard layout |
+| ![Plugin folder](docs/media/plugin-folder.webp) | |
+| A plugin opened as a folder (Tab) | |
 
 ## Requirements
 
