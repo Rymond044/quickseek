@@ -30,10 +30,11 @@ ListView {
         return i.kind;
     }
 
+    // "" when the theme has no such icon: the row then falls back to a glyph tile
     function iconSource(name) {
-        if (!name) return Quickshell.iconPath("application-x-executable");
+        if (!name) return "";
         if (name.startsWith("/")) return "file://" + name;
-        return Quickshell.iconPath(name, "application-x-executable");
+        return Quickshell.iconPath(name, true);
     }
 
     delegate: Item {
@@ -71,16 +72,18 @@ ListView {
                 height: size
 
                 IconImage {
+                    id: image
+                    readonly property bool ok: !!source.toString() && status !== Image.Error
                     anchors.fill: parent
-                    visible: row.item?.iconType === "theme"
-                    source: visible ? list.iconSource(row.item.icon) : ""
+                    visible: ok
+                    source: row.item?.iconType === "theme" ? list.iconSource(row.item.icon) : ""
                     asynchronous: true
                 }
 
                 // Glyph icons sit on a tinted rounded tile, like settings icons
                 Rectangle {
                     id: tile
-                    visible: row.item?.iconType !== "theme"
+                    visible: !image.ok
                     readonly property color tint: row.item ? Theme.tint(list.tintKey(row.item)) : Theme.accent
                     anchors.fill: parent
                     radius: Math.round(parent.size * 0.26)
@@ -92,7 +95,7 @@ ListView {
                     border.color: Qt.alpha("#ffffff", 0.12)
                     Text {
                         anchors.centerIn: parent
-                        text: row.item?.icon ?? ""
+                        text: row.item?.iconType === "theme" ? "󰣆" : row.item?.icon ?? ""
                         color: "#ffffff"
                         font { family: Settings.s.fonts.icons; pixelSize: Math.round(icon.size * 0.5) }
                     }

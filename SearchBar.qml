@@ -47,7 +47,7 @@ Item {
         color: Theme.foreground
         selectionColor: Theme.selection
         selectedTextColor: Theme.onSelection
-        font { family: Settings.textFont; pointSize: Settings.s.fonts.size + 7; weight: Font.Light }
+        font { family: Settings.textFont; pointSize: Settings.s.fonts.size + 7 }
         echoMode: Engine.prompt?.password ? TextInput.Password : TextInput.Normal
         passwordCharacter: "•"
         clip: true
