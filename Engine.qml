@@ -13,7 +13,7 @@ Singleton {
     property string query: ""
     property var stack: []         // folder keys, innermost last
     property var prompt: null      // { plugin, id, title, message, password }
-    property var rows: []          // { header } | { item, crumb }
+    property var rows: []          // { header } | { item, crumb, big }
     property int sel: -1
     property bool userMoved: false // keep the selection across refreshes only if the user picked it
     property string confirmKey: ""
@@ -265,13 +265,13 @@ Singleton {
         let top = null;
         if (prefixed) {
             top = prefixed;
-            out.push({ header: "Top hit" }, { item: top });
+            out.push({ header: "Top hit" }, { item: top, big: true });
         } else if (calc && calc.query === raw) {
             top = make({ key: "calc", kind: "calc", group: "Calculator", title: calc.result, status: "copy", icon: "󰃬", iconType: "glyph" });
-            out.push({ header: "Calculator" }, { item: top });
+            out.push({ header: "Calculator" }, { item: top, big: true });
         } else if (scored.length) {
             top = scored[0].item;
-            out.push({ header: "Top hit" }, { item: top, crumb: crumb(top) });
+            out.push({ header: "Top hit" }, { item: top, crumb: crumb(top), big: true });
         }
 
         const groups = new Map();

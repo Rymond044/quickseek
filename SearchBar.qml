@@ -11,10 +11,10 @@ Item {
 
     Text {
         id: glass
-        anchors { left: parent.left; leftMargin: 18; verticalCenter: parent.verticalCenter }
+        anchors { left: parent.left; leftMargin: 20; verticalCenter: parent.verticalCenter }
         text: Engine.busyKey ? "󰔟" : "󰍉"
         color: Theme.dim
-        font { family: Settings.s.fonts.icons; pointSize: Settings.s.fonts.size + 5 }
+        font { family: Settings.s.fonts.icons; pointSize: Settings.s.fonts.size + 7 }
     }
 
     Row {
@@ -25,18 +25,16 @@ Item {
             model: bar.chips
             Rectangle {
                 required property string modelData
-                height: 26
-                width: chipText.implicitWidth + 20
-                radius: 8
-                color: Theme.surface
-                border.width: 1
-                border.color: Theme.border
+                height: 28
+                width: chipText.implicitWidth + 22
+                radius: 14
+                color: Qt.alpha(Theme.accent, Theme.light ? 0.14 : 0.22)
                 Text {
                     id: chipText
                     anchors.centerIn: parent
                     text: modelData + "  ›"
                     color: Theme.foreground
-                    font { family: Settings.s.fonts.text; pointSize: Settings.s.fonts.size }
+                    font { family: Settings.textFont; pointSize: Settings.s.fonts.size }
                 }
             }
         }
@@ -49,7 +47,7 @@ Item {
         color: Theme.foreground
         selectionColor: Theme.selection
         selectedTextColor: Theme.onSelection
-        font { family: Settings.s.fonts.text; pointSize: Settings.s.fonts.size + 5 }
+        font { family: Settings.textFont; pointSize: Settings.s.fonts.size + 7; weight: Font.Light }
         echoMode: Engine.prompt?.password ? TextInput.Password : TextInput.Normal
         passwordCharacter: "•"
         clip: true

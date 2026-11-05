@@ -19,7 +19,10 @@ Singleton {
         opacity: 0.96,
         colors: "",
         include: [],
-        fonts: { text: "sans-serif", icons: "Symbols Nerd Font", size: 11 },
+        // Empty text font = the desktop font (gsettings font-name), else sans-serif
+        fonts: { text: "", icons: "Symbols Nerd Font", size: 11 },
+        // Soft drop shadow under the window; turn off for compositor blur/glass
+        shadow: true,
         // Prepended to app launches and xdg-open, e.g. ["uwsm", "app", "--"]
         launchPrefix: [],
         plugins: [],
@@ -41,6 +44,8 @@ Singleton {
     })
 
     property var s: defaults
+    property string systemFont: ""
+    readonly property string textFont: s.fonts.text || systemFont || "sans-serif"
     property var mainData: ({})
     property var includeData: ({})
 
@@ -71,6 +76,15 @@ Singleton {
         } catch (e) {
             console.warn("quickseek:", label, e);
             return {};
+        }
+    }
+
+    Process {
+        running: true
+        command: ["gsettings", "get", "org.gnome.desktop.interface", "font-name"]
+        stdout: StdioCollector {
+            // 'Family Name 11' -> Family Name
+            onStreamFinished: root.systemFont = text.trim().replace(/^'|'$/g, "").replace(/\s+[\d.]+$/, "")
         }
     }
 

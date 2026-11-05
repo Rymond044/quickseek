@@ -59,7 +59,8 @@ Restart, Shut down and Log out ask for a second Enter.
 | `width`        | 680                             | logical px, shrinks on narrow monitors              |
 | `maxRows`      | 9                               |                                                     |
 | `opacity`      | 0.96                            | background opacity                                  |
-| `fonts`        | sans-serif, Symbols Nerd Font, 11 | `{ "text", "icons", "size" }`                    |
+| `fonts`        | desktop font, Symbols Nerd Font, 11 | `{ "text", "icons", "size" }`; empty `text` = gsettings `font-name`, else sans-serif |
+| `shadow`       | true                            | drop shadow under the window                        |
 | `colors`       |                                 | path to a colors file, see below                    |
 | `launchPrefix` | `[]`                            | prepended to app launches and `xdg-open`            |
 | `plugins`      | `[]`                            | see [docs/plugins.md](docs/plugins.md)              |
@@ -68,7 +69,7 @@ Restart, Shut down and Log out ask for a second Enter.
 | `include`      | `[]`                            | more JSON files merged on top (watched too)         |
 
 `include` lets other tools change settings without touching your file, e.g. a script that writes
-`{ "opacity": 0.45 }` when a blur effect is on.
+`{ "opacity": 0.45, "shadow": false }` when a blur effect is on.
 
 ## Colors
 

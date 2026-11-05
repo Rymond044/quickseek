@@ -7,6 +7,7 @@ ListView {
 
     required property int headerHeight
     required property int rowHeight
+    required property int bigRowHeight
 
     model: Engine.rows
     currentIndex: Engine.sel
@@ -17,77 +18,111 @@ ListView {
     // Hover selects only when the pointer really moves, not when rows slide under a still cursor
     property point lastMouse: Qt.point(-1, -1)
 
+    function esc(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // All items of one top-level section share a tile color
+    function tintKey(i) {
+        const a = i.ancestors ?? [];
+        if (a.length >= 2) return a[a.length - 2];
+        if (a.length === 1 || i.kind === "folder") return i.key;
+        return i.kind;
+    }
+
+    function iconSource(name) {
+        if (!name) return Quickshell.iconPath("application-x-executable");
+        if (name.startsWith("/")) return "file://" + name;
+        return Quickshell.iconPath(name, "application-x-executable");
+    }
+
     delegate: Item {
         id: row
         required property var modelData
         required property int index
         readonly property var item: modelData.item ?? null
+        readonly property bool big: !!modelData.big
         readonly property bool selected: index === Engine.sel
 
         width: list.width
-        height: item ? list.rowHeight : list.headerHeight
+        height: !item ? list.headerHeight : big ? list.bigRowHeight : list.rowHeight
 
         Text {
             visible: !row.item
-            anchors { left: parent.left; leftMargin: 20; bottom: parent.bottom; bottomMargin: 4 }
+            anchors { left: parent.left; leftMargin: 22; bottom: parent.bottom; bottomMargin: 5 }
             text: row.modelData.header ?? ""
-            color: Theme.faint
-            font { family: Settings.s.fonts.text; pointSize: Settings.s.fonts.size - 2; weight: Font.DemiBold }
+            color: Theme.dim
+            font { family: Settings.textFont; pointSize: Settings.s.fonts.size - 1.5; weight: Font.DemiBold }
         }
 
         Rectangle {
+            id: bg
             visible: !!row.item
-            anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
-            radius: 10
+            anchors { fill: parent; leftMargin: 8; rightMargin: 8; topMargin: 1; bottomMargin: 1 }
+            radius: 12
             color: row.selected ? Theme.selection : hover.containsMouse ? Theme.surface : "transparent"
-
-            readonly property color fg: row.selected ? Theme.onSelection : Theme.foreground
-            readonly property color fgDim: row.selected ? Qt.alpha(Theme.onSelection, 0.7) : Theme.dim
+            Behavior on color { ColorAnimation { duration: 90 } }
 
             Item {
                 id: icon
-                anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
-                width: 24
-                height: 24
+                readonly property int size: row.big ? 40 : 32
+                anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                width: size
+                height: size
+
                 IconImage {
                     anchors.fill: parent
                     visible: row.item?.iconType === "theme"
-                    source: visible ? Quickshell.iconPath(row.item.icon ?? "", "application-x-executable") : ""
+                    source: visible ? list.iconSource(row.item.icon) : ""
                     asynchronous: true
                 }
-                Text {
-                    anchors.centerIn: parent
+
+                // Glyph icons sit on a tinted rounded tile, like settings icons
+                Rectangle {
+                    id: tile
                     visible: row.item?.iconType !== "theme"
-                    text: row.item?.icon ?? ""
-                    color: parent.parent.fg
-                    font { family: Settings.s.fonts.icons; pointSize: Settings.s.fonts.size + 4 }
+                    readonly property color tint: row.item ? Theme.tint(list.tintKey(row.item)) : Theme.accent
+                    anchors.fill: parent
+                    radius: Math.round(parent.size * 0.26)
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: Qt.lighter(tile.tint, 1.3) }
+                        GradientStop { position: 1; color: tile.tint }
+                    }
+                    border.width: 1
+                    border.color: Qt.alpha("#ffffff", 0.12)
+                    Text {
+                        anchors.centerIn: parent
+                        text: row.item?.icon ?? ""
+                        color: "#ffffff"
+                        font { family: Settings.s.fonts.icons; pixelSize: Math.round(icon.size * 0.5) }
+                    }
                 }
             }
 
             Text {
                 id: status
-                anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
                 width: Math.min(implicitWidth, parent.width * 0.4)
                 elide: Text.ElideRight
                 text: Engine.busyKey && row.item?.key === Engine.busyKey ? "…"
                     : Engine.confirmKey && row.item?.key === Engine.confirmKey ? "press ↵ again"
                     : row.item?.folder ? (row.item.status ? row.item.status + "  ›" : "›")
                     : row.item?.status ?? ""
-                color: parent.fgDim
-                font { family: Settings.s.fonts.text; pointSize: Settings.s.fonts.size }
+                color: Engine.confirmKey && row.item?.key === Engine.confirmKey ? Theme.accent : Theme.dim
+                font { family: Settings.textFont; pointSize: Settings.s.fonts.size }
             }
 
             Text {
                 anchors { left: icon.right; leftMargin: 12; right: status.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
                 elide: Text.ElideRight
                 textFormat: Text.StyledText
-                text: (row.modelData.crumb ? `<font color="${parent.fgDim}">${esc(row.modelData.crumb)}  ›  </font>` : "")
-                    + esc(row.item?.title ?? "")
-                color: parent.fg
-                font { family: Settings.s.fonts.text; pointSize: Settings.s.fonts.size + 1 }
-
-                function esc(s) {
-                    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                text: (row.modelData.crumb ? `<font color="${Theme.dim}">${list.esc(row.modelData.crumb)}  ›  </font>` : "")
+                    + list.esc(row.item?.title ?? "")
+                color: Theme.foreground
+                font {
+                    family: Settings.textFont
+                    pointSize: Settings.s.fonts.size + (row.big ? 3 : 1)
+                    weight: row.big ? Font.DemiBold : Font.Normal
                 }
             }
         }
