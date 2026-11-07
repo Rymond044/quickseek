@@ -37,6 +37,8 @@ Singleton {
         confirmKey = "";
         clearMenus();
         stack = folderKey && byKey[folderKey] ? [folderKey] : [];
+        fileCache = {};
+        Files.open();
         for (const p of plugins) p.list();
         refresh(false);
         if (mapped) { shown = true; return; }
@@ -95,6 +97,21 @@ Singleton {
         function onValuesChanged() { rebuildTimer.restart(); }
     }
 
+    // Settings and pins only change statuses of the settings folder
+    Connections {
+        target: Settings
+        function onSChanged() { rebuildTimer.restart(); }
+    }
+    Connections {
+        target: History
+        function onPinsChanged() { rebuildTimer.restart(); }
+    }
+    Connections {
+        target: Files
+        function onUpdated() { if (root.shown) root.refresh(true); }
+        function onIndexingChanged() { rebuildTimer.restart(); }
+    }
+
     Timer {
         id: rebuildTimer
         interval: 30
@@ -138,6 +155,138 @@ Singleton {
             iconType: "glyph",
             command: Settings.s.power[id]
         }));
+    }
+
+    // ---- files
+
+    property var fileCache: ({})   // key -> item, cleared on open
+    property var iconCache: ({})   // file type -> theme icon name that exists
+
+    readonly property var fileIcons: [
+        [/\.(png|jpe?g|webp|gif|svg|bmp|avif|heic|tiff?|ico|jxl)$/, ["image-x-generic"]],
+        [/\.(mp4|mkv|webm|avi|mov|m4v|flv|wmv)$/, ["video-x-generic"]],
+        [/\.(mp3|flac|ogg|opus|wav|m4a|aac|wma)$/, ["audio-x-generic"]],
+        [/\.pdf$/, ["application-pdf", "x-office-document"]],
+        [/\.(epub|fb2|djvu|mobi)$/, ["x-office-document"]],
+        [/\.(docx?|odt|rtf)$/, ["x-office-document"]],
+        [/\.(xlsx?|ods|csv|tsv)$/, ["x-office-spreadsheet"]],
+        [/\.(pptx?|odp)$/, ["x-office-presentation"]],
+        [/\.(zip|tar|gz|tgz|xz|zst|bz2|7z|rar|deb|rpm|pkg\.tar\.zst)$/, ["package-x-generic"]],
+        [/\.(iso|img|qcow2)$/, ["media-optical", "package-x-generic"]],
+        [/\.(ttf|otf|woff2?)$/, ["font-x-generic"]],
+        [/\.(sh|zsh|bash|fish|py|js|ts|lua|go|rs|c|cc|cpp|h|hpp|java|kt|rb|php|qml|nix)$/, ["text-x-script"]],
+        [/\.(html?|css)$/, ["text-html", "text-x-script"]],
+        [/\.(appimage|exe|run|bin)$/, ["application-x-executable"]],
+        [/\.desktop$/, ["application-x-desktop", "application-x-executable"]]
+    ]
+
+    function themeIcon(type, names) {
+        if (iconCache[type] === undefined)
+            iconCache[type] = names.concat(["text-x-generic"]).find(n => Quickshell.iconPath(n, true)) ?? "";
+        return iconCache[type];
+    }
+
+    function fileIcon(path, dir) {
+        if (dir) {
+            const special = { [home]: "user-home", [home + "/Desktop"]: "user-desktop", [home + "/Downloads"]: "folder-download",
+                [home + "/Documents"]: "folder-documents", [home + "/Pictures"]: "folder-pictures",
+                [home + "/Music"]: "folder-music", [home + "/Videos"]: "folder-videos" }[path];
+            return special ? themeIcon(special, [special, "folder"]) : themeIcon("dir", ["folder"]);
+        }
+        const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
+        for (const [re, names] of fileIcons)
+            if (re.test(name)) return themeIcon(names[0], names);
+        return themeIcon("file", ["text-x-generic"]);
+    }
+
+    readonly property string home: Settings.home
+
+    function tilde(p) {
+        return p === home ? "~" : p.startsWith(home + "/") ? "~" + p.slice(home.length) : p;
+    }
+
+    // Folder keys end with "/", so a key alone is enough to rebuild the item (pins, recents)
+    function fileItem(path, dir) {
+        const key = "file:" + path + (dir ? "/" : "");
+        if (fileCache[key]) return fileCache[key];
+        const slash = path.lastIndexOf("/");
+        const parent = path.slice(0, slash) || "/";
+        const it = make({
+            key, path, dir,
+            kind: "file",
+            group: dir ? "Folders" : "Files",
+            title: path.slice(slash + 1),
+            status: tilde(parent),
+            icon: fileIcon(path, dir),
+            iconType: "theme",
+            glyph: dir ? "\uf07b" : "\uf15b",   // when the icon theme has nothing
+            depth: (tilde(path).match(/\//g) ?? []).length
+        });
+        // "Report_2027.pdf" -> words "report 2027 pdf"; the glued form still matches as a keyword
+        it.nKeywords = it.nTitle;
+        it.nTitle = Fuzzy.normalize(it.title.replace(/[._-]+/g, " "));
+        fileCache[key] = it;
+        return it;
+    }
+
+    function fromKey(key) {
+        if (key.startsWith("file:")) {
+            const dir = key.endsWith("/");
+            return fileItem(dir ? key.slice(5, -1) : key.slice(5), dir);
+        }
+        return pinnable(byKey[key]) ? byKey[key] : null;
+    }
+
+    function pinnable(i) {
+        return !!i && !i.key.startsWith("menu:") && i.kind !== "web" && i.kind !== "calc";
+    }
+
+    function togglePin(i) {
+        if (pinnable(i)) History.togglePin(i.key);
+    }
+
+    function showInFolder(path) {
+        const uri = "file://" + path.split("/").map(encodeURIComponent).join("/").replace(/'/g, "%27");
+        const parent = path.slice(0, path.lastIndexOf("/")) || "/";
+        Quickshell.execDetached(["sh", "-c",
+            'gdbus call --session --dest org.freedesktop.FileManager1 --object-path /org/freedesktop/FileManager1 '
+            + '--method org.freedesktop.FileManager1.ShowItems "$1" "" >/dev/null 2>&1 || exec "$@"',
+            "sh", `['${uri}']`].concat(Settings.s.launchPrefix ?? [], Settings.s.opener ?? ["xdg-open"], [parent]));
+    }
+
+    // ---- quickseek's own settings, a folder like a plugin's
+
+    function settingsItems() {
+        const base = "settings";
+        const ev = Settings.emptyView;
+        const names = emptyNames;
+        const toggle = (key, title, on, run, extra) => Object.assign({
+            key: base + ":" + key, kind: "setting", group: "quickseek", title, status: on ? "on" : "off",
+            icon: "\uf00c", iconType: "glyph", ancestors: [base], run
+        }, extra ?? {});
+        const emptyToggle = (name, n) => toggle("empty:" + name, names[name], ev.includes(name), () =>
+            Settings.set(["emptyView"], Object.keys(names).filter(x => x === name ? !ev.includes(x) : ev.includes(x))),
+            { ancestors: [base + ":empty", base], order: n, keywords: "empty screen" });
+        const list = [
+            { key: base, kind: "folder", folder: true, group: "quickseek", title: "quickseek settings",
+              icon: "\uf1de", iconType: "glyph", keywords: "preferences options config" },
+            { key: base + ":empty", kind: "folder", folder: true, group: "quickseek", title: "Empty screen",
+              status: ev.map(x => names[x]).join(", ") || "nothing", icon: "\uf009", iconType: "glyph",
+              ancestors: [base], order: 0, keywords: "start pinned recent frequent" },
+            emptyToggle("pinned", 0), emptyToggle("recent", 1), emptyToggle("popular", 2),
+            toggle("files", "File search", Files.enabled, () => Settings.set(["files", "enabled"], !Files.enabled),
+                { order: 1, icon: "\uf002", keywords: "files folders index" }),
+            toggle("index", "Rebuild file index", false, () => Files.rebuild(),
+                { order: 2, icon: "\uf021", status: Files.indexing ? "…" : "", keywords: "files update" }),
+            toggle("unpin", "Unpin all", false, () => History.unpinAll(),
+                { order: 3, icon: "\uf08d", status: History.pins.length ? String(History.pins.length) : "", confirm: true, keywords: "pins" }),
+            toggle("history", "Clear history", false, () => History.clear(),
+                { order: 4, icon: "\uf1da", status: "", confirm: true, keywords: "frecency forget" }),
+            toggle("file", "Open settings file", false, null,
+                { order: 5, icon: "\uf044", status: "", closes: true, keywords: "edit json",
+                  run: () => { Settings.ensureFile(); openPath(Settings.file); } })
+        ];
+        return list.map(make);
     }
 
     function pluginItems(p) {
@@ -184,7 +333,7 @@ Singleton {
     }
 
     function rebuild() {
-        let list = appItems().concat(powerItems());
+        let list = appItems().concat(powerItems(), settingsItems());
         for (const p of plugins) list = list.concat(pluginItems(p));
         list = list.concat(menuItems);
         const map = {};
@@ -244,7 +393,7 @@ Singleton {
         const prefixed = m && engines[m[1]] ? webItem(m[1], m[2]) : null;
 
         const q = Fuzzy.normalize(raw);
-        if (!q) return f ? childrenOf(f).map(item => ({ item })) : [];
+        if (!q) return f ? childrenOf(f).map(item => ({ item })) : emptyRows();
 
         const alt = Fuzzy.normalize(Fuzzy.swapLayout(raw));
         const scored = [];
@@ -255,8 +404,10 @@ Singleton {
             if (alt !== q) s = Math.max(s, 0.97 * Fuzzy.scoreFields(alt, fields));
             if (s <= 0) continue;
             s += History.frecency(i.key) + History.memory(i.key, q);
+            if (History.pinned(i.key)) s += 2000;
             scored.push({ item: i, score: s });
         }
+        if (!f) scoreFiles(raw, q, alt, scored);
         scored.sort((a, b) => b.score - a.score);
 
         if (f) return scored.map(x => ({ item: x.item, crumb: crumb(x.item) }));
@@ -290,9 +441,65 @@ Singleton {
         return out;
     }
 
+    // Files: below other results of the same score, deeper ones lower
+    function scoreFiles(raw, q, alt, scored) {
+        if (q.length < 2) return;
+        const key = fileQueries(raw).join("\n");
+        const dotQuery = raw.trim().startsWith(".");
+        const seen = {};
+        const cands = [];
+        for (const k of History.pins) if (k.startsWith("file:")) cands.push(fromKey(k));
+        if (Files.enabled) {
+            for (const x of Files.live) cands.push(fileItem(x.path, x.dir));
+            if (Files.foundFor === key) for (const x of Files.found) cands.push(fileItem(x.path, x.dir));
+        }
+        for (const i of cands) {
+            if (seen[i.key]) continue;
+            seen[i.key] = true;
+            if (!dotQuery && i.path.includes("/.")) continue;
+            const fields = [[i.nTitle, 1], [i.nKeywords, 0.9, 700]];
+            let s = Fuzzy.scoreFields(q, fields);
+            if (alt !== q) s = Math.max(s, 0.97 * Fuzzy.scoreFields(alt, fields));
+            if (s <= 0) continue;
+            // A whole-name match deep in a project tree loses to a word match in ~ or ~/Downloads
+            s = 0.9 * Math.min(s, 850) - Math.min(15 * (i.depth - 1), 150) + History.frecency(i.key) + History.memory(i.key, q);
+            if (History.pinned(i.key)) s += 2000;
+            scored.push({ item: i, score: s });
+        }
+    }
+
+    readonly property var emptyNames: ({ pinned: "Pinned", recent: "Recent", popular: "Frequent" })
+
+    function emptyRows() {
+        const out = [];
+        const used = {};
+        for (const sec of Settings.emptyView) {
+            const keys = sec === "pinned" ? History.pins : sec === "recent" ? History.recent() : sec === "popular" ? History.popular() : [];
+            const max = sec === "pinned" ? Settings.s.maxRows : 5;
+            const items = [];
+            for (const k of keys) {
+                if (items.length >= max) break;
+                const i = used[k] ? null : fromKey(k);
+                if (!i) continue;
+                used[k] = true;
+                items.push(i);
+            }
+            if (!items.length) continue;
+            out.push({ header: emptyNames[sec] });
+            for (const item of items) out.push({ item, crumb: crumb(item) });
+        }
+        return out;
+    }
+
+    function fileQueries(raw) {
+        const words = s => s.toLowerCase().trim().split(/\s+/).join(" ");
+        return [words(raw), words(Fuzzy.swapLayout(raw))].filter((x, n, a) => a.indexOf(x) === n);
+    }
+
     function setQuery(q) {
         query = q;
         confirmKey = "";
+        if (!prompt && !folder) Files.search(fileQueries(q));
         refresh(false);
         if (!prompt && !folder && looksLikeMath(q.trim())) calcTimer.restart();
     }
@@ -379,6 +586,10 @@ Singleton {
         Quickshell.execDetached((Settings.s.launchPrefix ?? []).concat(cmd));
     }
 
+    function openPath(target) {
+        launch((Settings.s.opener ?? ["xdg-open"]).concat([target]));
+    }
+
     function activate(item, alt) {
         if (prompt) return answerPrompt();
         item = item ?? current;
@@ -389,6 +600,14 @@ Singleton {
 
         History.record(item.key, Fuzzy.normalize(query));
         switch (item.kind) {
+        case "file":
+            if (alt) showInFolder(item.path);
+            else openPath(item.path);
+            break;
+        case "setting":
+            item.run?.();
+            if (!item.closes) return;
+            break;
         case "app":
             if ((Settings.s.launchPrefix ?? []).length) launch([item.entry.id + ".desktop"]);
             else item.entry.execute();
@@ -397,7 +616,7 @@ Singleton {
             Quickshell.execDetached(item.command);
             break;
         case "web":
-            launch(["xdg-open", item.url]);
+            openPath(item.url);
             break;
         case "calc":
             Quickshell.execDetached(["wl-copy", "--", item.title]);

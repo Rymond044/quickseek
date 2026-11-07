@@ -1,0 +1,9 @@
+# Rebuilds quickseek's file index. Change the path if quickseek lives elsewhere.
+[Unit]
+Description=quickseek file index
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+ExecStart=%h/Apps/quickseek/bin/quickseek-files index --auto

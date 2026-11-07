@@ -1,5 +1,5 @@
-// Frecency (how often and how recently an item was picked) and query memory
-// (which item was picked for a query). Stored in ~/.local/state/quickseek/history.json.
+// Frecency (how often and how recently an item was picked), query memory (which item was
+// picked for a query) and pins. Stored in ~/.local/state/quickseek/history.json.
 pragma Singleton
 import QtQuick
 import Quickshell
@@ -10,6 +10,36 @@ Singleton {
 
     property var items: ({})    // key -> { n: count, t: last pick (ms) }
     property var queries: ({})  // query -> { key: count }
+    property var pins: []       // keys, in pin order
+
+    function pinned(key) {
+        return pins.includes(key);
+    }
+
+    function togglePin(key) {
+        pins = pinned(key) ? pins.filter(k => k !== key) : pins.concat([key]);
+        saveTimer.restart();
+    }
+
+    function unpinAll() {
+        pins = [];
+        saveTimer.restart();
+    }
+
+    // Keys, most recently / most often picked first
+    function recent() {
+        return Object.keys(items).sort((a, b) => items[b].t - items[a].t);
+    }
+
+    function popular() {
+        return Object.keys(items).sort((a, b) => items[b].n - items[a].n || items[b].t - items[a].t);
+    }
+
+    function clear() {
+        items = {};
+        queries = {};
+        saveTimer.restart();
+    }
 
     function frecency(key) {
         const e = items[key];
@@ -53,7 +83,7 @@ Singleton {
         interval: 800
         onTriggered: {
             root.prune();
-            file.setText(JSON.stringify({ items: root.items, queries: root.queries }));
+            file.setText(JSON.stringify({ items: root.items, queries: root.queries, pins: root.pins }));
         }
     }
 
@@ -67,6 +97,7 @@ Singleton {
                 const j = JSON.parse(text());
                 root.items = j.items ?? {};
                 root.queries = j.queries ?? {};
+                root.pins = j.pins ?? [];
             } catch (e) {
                 console.warn("quickseek: history", e);
             }

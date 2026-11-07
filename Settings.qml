@@ -23,8 +23,13 @@ Singleton {
         fonts: { text: "", icons: "Symbols Nerd Font", size: 11 },
         // Soft drop shadow under the window; turn off for compositor blur/glass
         shadow: true,
-        // Prepended to app launches and xdg-open, e.g. ["uwsm", "app", "--"]
+        // Prepended to app launches and the opener, e.g. ["uwsm", "app", "--"]
         launchPrefix: [],
+        // Opens files, folders and URLs. gio runs Terminal=true apps (nvim) in a terminal, xdg-open does not
+        opener: ["gio", "open"],
+        // What an empty query shows: any of "pinned", "recent", "popular", in this order
+        emptyView: [],
+        files: { enabled: true },
         plugins: [],
         web: {
             default: "g",
@@ -47,6 +52,15 @@ Singleton {
     property string systemFont: ""
     readonly property string textFont: s.fonts.text || systemFont || "sans-serif"
     property var mainData: ({})
+    property bool mainBroken: false   // never overwrite a file we could not parse
+    property bool mainExists: false
+
+    readonly property string file: configDir + "/settings.json"
+
+    // Create an empty settings.json so it can be opened in an editor
+    function ensureFile() {
+        if (!mainExists) main.setText("{}\n");
+    }
     property var includeData: ({})
 
     function expand(p) {
@@ -75,8 +89,32 @@ Singleton {
             return JSON.parse(t);
         } catch (e) {
             console.warn("quickseek:", label, e);
-            return {};
+            return null;
         }
+    }
+
+    // Change one key of settings.json, e.g. set(["files", "enabled"], false). Writes through
+    // symlinks (dotfiles), drops nothing else, but reformats the file.
+    function set(path, value) {
+        if (mainBroken) {
+            console.warn("quickseek: settings.json does not parse, not writing it");
+            return;
+        }
+        const d = JSON.parse(JSON.stringify(mainData));
+        let o = d;
+        for (const k of path.slice(0, -1)) {
+            if (!o[k] || typeof o[k] !== "object" || Array.isArray(o[k])) o[k] = {};
+            o = o[k];
+        }
+        o[path[path.length - 1]] = value;
+        mainData = d;
+        rebuild();
+        main.setText(JSON.stringify(d, null, 2) + "\n");
+    }
+
+    readonly property var emptyView: {
+        const v = s.emptyView;
+        return (Array.isArray(v) ? v : v ? [v] : []).filter(x => x !== "none");
     }
 
     Process {
@@ -88,15 +126,23 @@ Singleton {
         }
     }
 
+    Component.onCompleted: Quickshell.execDetached(["mkdir", "-p", configDir])
+
     FileView {
         id: main
-        path: root.configDir + "/settings.json"
+        path: root.file
         watchChanges: true
         printErrors: false
         blockLoading: true
         onFileChanged: reload()
-        onLoaded: { root.mainData = root.parse(main, path); root.rebuild(); }
-        onLoadFailed: { root.mainData = {}; root.rebuild(); }
+        onLoaded: {
+            const d = root.parse(main, path);
+            root.mainBroken = d === null;
+            root.mainExists = true;
+            root.mainData = d ?? {};
+            root.rebuild();
+        }
+        onLoadFailed: { root.mainBroken = false; root.mainExists = false; root.mainData = {}; root.rebuild(); }
     }
 
     Variants {
@@ -108,7 +154,7 @@ Singleton {
             printErrors: false
             blockLoading: true
             onFileChanged: reload()
-            onLoaded: { root.includeData[modelData] = root.parse(this, path); root.rebuild(); }
+            onLoaded: { root.includeData[modelData] = root.parse(this, path) ?? {}; root.rebuild(); }
             onLoadFailed: { delete root.includeData[modelData]; root.rebuild(); }
         }
     }

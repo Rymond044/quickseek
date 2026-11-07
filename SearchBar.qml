@@ -70,6 +70,8 @@ Item {
                 Engine.move(-1);
             } else if (k === Qt.Key_Return || k === Qt.Key_Enter) {
                 Engine.activate(null, e.modifiers & Qt.AltModifier);
+            } else if (ctrl && k === Qt.Key_P) {
+                Engine.togglePin(Engine.current);
             } else if (k === Qt.Key_Tab) {
                 Engine.enter(Engine.current);
             } else if (k === Qt.Key_Backspace && !text) {

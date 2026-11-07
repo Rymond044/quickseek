@@ -1,0 +1,88 @@
+#!/bin/sh
+# File search for quickseek: a private plocate index of $HOME plus a live look at a few folders.
+#   quickseek-files index [--auto]   rebuild the index (--auto: on battery only when it is old)
+#   quickseek-files search QUERY...  folders and files whose names contain every word of a QUERY
+#   quickseek-files recent           the live folders; also starts a rebuild when the index is stale
+# Output lines: "d<TAB>path" for folders, "f<TAB>path" for files.
+# Needs fd and plocate. Skipped: hidden paths (a shallow index of them is used for queries that
+# start with a dot), .cache, Trash, Steam, node_modules, .git, and anything in
+# ~/.config/quickseek/ignore (gitignore syntax).
+set -u
+
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/quickseek
+ignore=${XDG_CONFIG_HOME:-$HOME/.config}/quickseek/ignore
+stale=${QUICKSEEK_INDEX_MAX_AGE:-7200}   # seconds: rebuild on open after this long
+limit=300
+
+age() {
+    [ -e "$cache/files.db" ] || { echo 999999999; return; }
+    echo $(( $(date +%s) - $(stat -c %Y "$cache/files.db") ))
+}
+
+on_battery() {
+    for s in /sys/class/power_supply/*; do
+        [ "$(cat "$s/type" 2>/dev/null)" = Mains ] && [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && return 1
+    done
+    for s in /sys/class/power_supply/*; do
+        [ "$(cat "$s/type" 2>/dev/null)" = Battery ] && return 0
+    done
+    return 1
+}
+
+dirs() {
+    for d in DOWNLOAD DESKTOP DOCUMENTS; do
+        p=$(xdg-user-dir "$d" 2>/dev/null) || p=
+        [ -n "$p" ] && [ "$p" != "$HOME" ] && [ -d "$p" ] && echo "$p"
+    done
+}
+
+index() {
+    if [ "${1:-}" = --auto ] && on_battery && [ "$(age)" -lt "$stale" ]; then exit 0; fi
+    mkdir -p "$cache"
+    exec 9>"$cache/index.lock"
+    flock -n 9 || exit 0
+    tmp=$(mktemp -d "$cache/index.XXXXXX")
+    trap 'rm -rf "$tmp"' EXIT
+    set -- --absolute-path --no-ignore-vcs --color never \
+        -E .cache -E .local/share/Trash -E .local/share/Steam -E node_modules -E .git
+    [ -f "$ignore" ] && set -- "$@" --ignore-file "$ignore"
+    # fd marks folders with a trailing slash; plocate -b would not match their names then
+    # Shallow paths first: a query that hits the result limit keeps those
+    nice -n 19 fd "$@" . "$HOME" | sed 's|/$||' | awk -F/ '{ print NF "\t" $0 }' | sort -n -s -k1,1 | cut -f2- > "$tmp/files"
+    nice -n 19 fd "$@" --hidden --max-depth 3 . "$HOME" | sed 's|/$||' | grep -F '/.' > "$tmp/dot"
+    plocate-build -p -l no "$tmp/files" "$tmp/files.db" &&
+        plocate-build -p -l no "$tmp/dot" "$tmp/dot.db" &&
+        mv "$tmp/dot.db" "$cache/dot.db" && mv "$tmp/files.db" "$cache/files.db"
+}
+
+# Paths from stdin -> typed lines; deleted ones are dropped
+mark() {
+    while IFS= read -r p; do
+        if [ -d "$p" ]; then printf 'd\t%s\n' "$p"; elif [ -e "$p" ]; then printf 'f\t%s\n' "$p"; fi
+    done
+}
+
+search() {
+    [ -e "$cache/files.db" ] || exit 0
+    for q in "$@"; do
+        db=$cache/files.db
+        case $q in .*) [ -e "$cache/dot.db" ] && db=$db:$cache/dot.db ;; esac
+        # shellcheck disable=SC2086 # one word per pattern
+        plocate -d "$db" -i -b -l "$limit" -- $q 2>/dev/null
+    done | awk '!seen[$0]++' | mark
+}
+
+recent() {
+    [ "$(age)" -ge "$stale" ] && (setsid "$0" index >/dev/null 2>&1 &)
+    d=$(dirs)
+    [ -n "$d" ] || exit 0
+    printf '%s\n' "$d" | tr '\n' '\0' | xargs -0 fd --absolute-path --color never --max-depth 3 --max-results 2000 . |
+        sed 's|/$||' | mark
+}
+
+case ${1:-} in
+index) shift; index "$@" ;;
+search) shift; search "$@" ;;
+recent) recent ;;
+*) sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 2 ;;
+esac

@@ -10,7 +10,8 @@ import Quickshell.Hyprland
 
 ShellRoot {
     GlobalShortcut {
-        appid: "quickseek"
+        // A second copy (development) needs another id: Hyprland rejects a taken shortcut
+        appid: Quickshell.env("QUICKSEEK_APPID") || "quickseek"
         name: "toggle"
         description: "Open or close quickseek"
         onPressed: Engine.toggle()

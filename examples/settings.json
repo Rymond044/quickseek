@@ -2,6 +2,7 @@
   "width": 680,
   "fonts": { "text": "Inter", "icons": "Symbols Nerd Font", "size": 11 },
   "launchPrefix": ["uwsm", "app", "--"],
+  "emptyView": ["pinned", "recent"],
   "web": {
     "default": "ddg",
     "engines": {

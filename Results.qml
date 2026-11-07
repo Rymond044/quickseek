@@ -95,7 +95,7 @@ ListView {
                     border.color: Qt.alpha("#ffffff", 0.12)
                     Text {
                         anchors.centerIn: parent
-                        text: row.item?.iconType === "theme" ? "󰣆" : row.item?.icon ?? ""
+                        text: row.item?.iconType === "theme" ? row.item.glyph ?? "󰣆" : row.item?.icon ?? ""
                         color: "#ffffff"
                         font { family: Settings.s.fonts.icons; pixelSize: Math.round(icon.size * 0.5) }
                     }
@@ -103,10 +103,19 @@ ListView {
             }
 
             Text {
-                id: status
+                id: pin
+                visible: !!row.item && History.pins.includes(row.item.key)
                 anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+                text: "\uf08d"
+                color: Theme.dim
+                font { family: Settings.s.fonts.icons; pointSize: Settings.s.fonts.size }
+            }
+
+            Text {
+                id: status
+                anchors { right: pin.visible ? pin.left : parent.right; rightMargin: pin.visible ? 8 : 14; verticalCenter: parent.verticalCenter }
                 width: Math.min(implicitWidth, parent.width * 0.4)
-                elide: Text.ElideRight
+                elide: row.item?.kind === "file" ? Text.ElideMiddle : Text.ElideRight
                 text: Engine.busyKey && row.item?.key === Engine.busyKey ? "…"
                     : Engine.confirmKey && row.item?.key === Engine.confirmKey ? "press ↵ again"
                     : row.item?.folder ? (row.item.status ? row.item.status + "  ›" : "›")

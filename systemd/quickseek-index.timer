@@ -1,0 +1,11 @@
+# Every 30 min; on battery the index is rebuilt only when older than 2 h.
+[Unit]
+Description=Refresh quickseek's file index
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target
