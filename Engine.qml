@@ -38,8 +38,9 @@ Singleton {
         clearMenus();
         stack = folderKey && byKey[folderKey] ? [folderKey] : [];
         fileCache = {};
-        Files.open();
-        for (const p of plugins) p.list();
+        if (Files.inline || stack[0] === "files") Files.open();
+        for (const p of plugins) p.list(p.refresh);
+        if (stack.length) pluginOf(stack[0])?.list(2);
         refresh(false);
         if (mapped) { shown = true; return; }
         opening = true;
@@ -256,6 +257,14 @@ Singleton {
 
     // ---- quickseek's own settings, a folder like a plugin's
 
+    // "f report" or Tab on this item: a folder whose search is files only
+    function filesFolder() {
+        if (!Files.enabled) return [];
+        return [make({ key: "files", kind: "folder", folder: true, group: "Files", title: "Find files",
+            status: Files.prefix ? Files.prefix + " …" : "", icon: "\uf07b", iconType: "glyph",
+            keywords: "files folders documents search " + Files.prefix })];
+    }
+
     function settingsItems() {
         const base = "settings";
         const ev = Settings.emptyView;
@@ -276,6 +285,8 @@ Singleton {
             emptyToggle("pinned", 0), emptyToggle("recent", 1), emptyToggle("popular", 2),
             toggle("files", "File search", Files.enabled, () => Settings.set(["files", "enabled"], !Files.enabled),
                 { order: 1, icon: "\uf002", keywords: "files folders index" }),
+            toggle("inline", "Files in every search", Files.inline, () => Settings.set(["files", "inline"], !Files.inline),
+                { order: 1, icon: "\uf002", keywords: "files folders prefix" }),
             toggle("index", "Rebuild file index", false, () => Files.rebuild(),
                 { order: 2, icon: "\uf021", status: Files.indexing ? "…" : "", keywords: "files update" }),
             toggle("unpin", "Unpin all", false, () => History.unpinAll(),
@@ -287,6 +298,10 @@ Singleton {
                   run: () => { Settings.ensureFile(); openPath(Settings.file); } })
         ];
         return list.map(make);
+    }
+
+    function pluginOf(key) {
+        return plugins.find(p => key === "plugin:" + p.pid || key.startsWith("plugin:" + p.pid + ":")) ?? null;
     }
 
     function pluginItems(p) {
@@ -333,7 +348,7 @@ Singleton {
     }
 
     function rebuild() {
-        let list = appItems().concat(powerItems(), settingsItems());
+        let list = appItems().concat(powerItems(), filesFolder(), settingsItems());
         for (const p of plugins) list = list.concat(pluginItems(p));
         list = list.concat(menuItems);
         const map = {};
@@ -393,6 +408,7 @@ Singleton {
         const prefixed = m && engines[m[1]] ? webItem(m[1], m[2]) : null;
 
         const q = Fuzzy.normalize(raw);
+        if (f?.key === "files") return fileRows(raw, q);
         if (!q) return f ? childrenOf(f).map(item => ({ item })) : emptyRows();
 
         const alt = Fuzzy.normalize(Fuzzy.swapLayout(raw));
@@ -407,7 +423,7 @@ Singleton {
             if (History.pinned(i.key)) s += 2000;
             scored.push({ item: i, score: s });
         }
-        if (!f) scoreFiles(raw, q, alt, scored);
+        if (!f) scoreFiles(raw, q, alt, scored, Files.inline);
         scored.sort((a, b) => b.score - a.score);
 
         if (f) return scored.map(x => ({ item: x.item, crumb: crumb(x.item) }));
@@ -441,15 +457,28 @@ Singleton {
         return out;
     }
 
-    // Files: below other results of the same score, deeper ones lower
-    function scoreFiles(raw, q, alt, scored) {
+    // Files mode: pinned and recently opened files until something is typed
+    function fileRows(raw, q) {
+        if (!q) {
+            const keys = History.pins.concat(History.recent()).filter(k => k.startsWith("file:"));
+            return keys.filter((k, n) => keys.indexOf(k) === n).slice(0, Settings.s.maxRows).map(k => ({ item: fromKey(k) }));
+        }
+        const scored = [];
+        scoreFiles(raw, q, Fuzzy.normalize(Fuzzy.swapLayout(raw)), scored, true);
+        scored.sort((a, b) => b.score - a.score);
+        return scored.map(x => ({ item: x.item }));
+    }
+
+    // Files: below other results of the same score, deeper ones lower. Pinned files always
+    // take part; the index only when `all`
+    function scoreFiles(raw, q, alt, scored, all) {
         if (q.length < 2) return;
         const key = fileQueries(raw).join("\n");
         const dotQuery = raw.trim().startsWith(".");
         const seen = {};
         const cands = [];
         for (const k of History.pins) if (k.startsWith("file:")) cands.push(fromKey(k));
-        if (Files.enabled) {
+        if (Files.enabled && all) {
             for (const x of Files.live) cands.push(fileItem(x.path, x.dir));
             if (Files.foundFor === key) for (const x of Files.found) cands.push(fileItem(x.path, x.dir));
         }
@@ -497,11 +526,24 @@ Singleton {
     }
 
     function setQuery(q) {
+        if (!prompt && !folder && filePrefix(q)) {
+            const rest = q.replace(/^\s*\S+\s+/, "");
+            enter(byKey["files"]);
+            savedQuery["files"] = "";
+            q = rest;
+        }
         query = q;
         confirmKey = "";
-        if (!prompt && !folder) Files.search(fileQueries(q));
+        if (!prompt && (folder?.key === "files" || (!folder && Files.inline))) Files.search(fileQueries(q));
         refresh(false);
         if (!prompt && !folder && looksLikeMath(q.trim())) calcTimer.restart();
+    }
+
+    // "f " or the same key in the other layout ("а "); a web engine with that name wins
+    function filePrefix(q) {
+        const m = q.match(/^\s*(\S+)\s/);
+        if (!m || !byKey["files"] || !Files.prefix || engines[m[1]]) return false;
+        return m[1] === Files.prefix || Fuzzy.swapLayout(m[1]) === Files.prefix;
     }
 
     // ------------------------------------------------------------------ calculator
@@ -563,6 +605,11 @@ Singleton {
         if (!item?.folder) return false;
         savedQuery[item.key] = query;
         stack = stack.filter(k => !k.startsWith("menu:")).concat([item.key]);
+        pluginOf(item.key)?.list(2);   // statuses are what a folder is opened for
+        if (item.key === "files") {
+            Files.open();
+            Files.search([""]);
+        }
         query = "";
         refresh(false);
         return true;

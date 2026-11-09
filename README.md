@@ -6,15 +6,15 @@ settings menus (as plugins), a calculator, power actions and web search, in a sm
 <p align="center"><img src="docs/media/demo.webp" width="736" alt="quickseek: apps, calculator, wrong layout, web, a plugin folder"></p>
 
 - Results grouped like a desktop spotlight: top hit, then Applications, plugin groups, Web.
-- Files and folders in your home, from a private `plocate` index plus a live look at Downloads,
-  Desktop and Documents.
+- Files and folders in your home after the `f` prefix (`f report`), from a private `plocate` index
+  plus a live look at Downloads, Desktop and Documents.
 - Learns what you pick (frecency) and which item you pick for a query. Ctrl+P pins anything to the top.
 - Typed in the wrong keyboard layout? `цфддзфзук` finds the same as `wallpaper` (ЙЦУКЕН ↔ QWERTY).
 - Calculator and unit conversion through `qalc`: `2^10`, `5 km to mi`, `=sqrt(2)`. Enter copies the result.
 - Web: the last row is always "Search Google for …"; prefixes `g`, `yt`, `aw` (Arch Wiki).
 - Plugins are plain executables speaking JSON Lines, see [docs/plugins.md](docs/plugins.md).
 - Runs as a daemon with no timers or polling: idle means zero CPU and no wakeups. The window is
-  created on open and destroyed after it closes.
+  created on open and destroyed after it closes. See [Cost](#cost).
 
 ## Screenshots
 
@@ -51,7 +51,7 @@ hl.bind("SUPER + ALT + Space", hl.dsp.global("quickseek:toggle"))
 or the classic config: `bind = SUPER ALT, Space, global, quickseek:toggle`.
 
 IPC: `qs -p ~/Apps/quickseek ipc call quickseek toggle|open|close`, `… folder plugin:<id>`,
-`… search <text>`.
+`… folder files`, `… search <text>`; `… rows` prints what the window shows (for scripts and tests).
 
 Under uwsm, start the daemon with `uwsm app -s b -- qs -p ~/Apps/quickseek -n` and set
 `"launchPrefix": ["uwsm", "app", "--"]`, so apps get their own scope instead of living in quickseek's.
@@ -65,12 +65,19 @@ Under uwsm, start the daemon with `uwsm app -s b -- qs -p ~/Apps/quickseek -n` a
 | Alt+Enter                     | show a file in its folder                   |
 | Ctrl+P                        | pin / unpin                                 |
 | Tab                           | open folder                                 |
+| `f` and a space               | search files only                           |
 | Backspace on an empty query   | leave the folder                            |
 | Esc                           | close                                       |
 
 Restart, Shut down and Log out ask for a second Enter.
 
 ## Files
+
+Files are searched only after the prefix: type `f`, a space and the name (`f invoice`). The prefix turns
+into a "Find files ›" chip; Backspace on an empty query leaves it. `а` (the same key in the Russian
+layout) works too. Until you type a name the folder shows pinned and recently opened files. Pinned
+files also show up in the normal search. Set `"files": { "inline": true }` to mix files into every
+search instead (that runs `plocate` on every keystroke and lists the live folders on every open).
 
 `bin/quickseek-files` keeps a [plocate](https://plocate.sesse.net) index of `$HOME` in
 `~/.cache/quickseek/` (about half a second of CPU for 75 000 files). It skips hidden paths, `.cache`,
@@ -105,8 +112,8 @@ systemctl --user enable --now quickseek-index.timer
 | `launchPrefix` | `[]`                            | prepended to app launches and the opener            |
 | `opener`       | `["gio", "open"]`               | opens files, folders and URLs; unlike `xdg-open`, gio starts terminal apps such as nvim in a terminal |
 | `emptyView`    | `[]`                            | what an empty query shows: `"pinned"`, `"recent"`, `"popular"` |
-| `files`        | `{ "enabled": true }`           | file search                                         |
-| `plugins`      | `[]`                            | see [docs/plugins.md](docs/plugins.md)              |
+| `files`        | `{ "enabled": true, "prefix": "f", "inline": false }` | file search, see [Files](#files)  |
+| `plugins`      | `[]`                            | see [docs/plugins.md](docs/plugins.md); `"refresh": 120` lists a slow plugin at most every 2 min on open |
 | `web`          | Google, YouTube, Arch Wiki      | `{ "default": "g", "engines": { "g": { "name", "url": "…%s" } } }` |
 | `power`        | systemctl / loginctl            | commands for `lock`, `suspend`, `reboot`, `shutdown`, `logout` |
 | `include`      | `[]`                            | more JSON files merged on top (watched too)         |
@@ -131,6 +138,27 @@ The first file that exists wins:
 The format is pywal's (`special.background`, `special.foreground`, `colors.color0…15`) with an
 optional `accent`, or flat `{ "background", "foreground", "accent" }`. Light or dark look follows the
 background. Files are watched: a new wallpaper recolors an open window.
+
+## Cost
+
+Measured on a Core Ultra 5 125H laptop (Quickshell 0.3.2, Hyprland 0.57) with one plugin that shells
+out about a hundred times to list a control center. CPU includes child processes.
+
+| state                                | CPU per open                 | wakeups per open | memory                              |
+|--------------------------------------|------------------------------|------------------|-------------------------------------|
+| idle, 60 s                           | 0 %                          | 0 /s             | RSS 125 MB after start, ~165 MB after the first open (PSS ~90 MB) |
+| open and close, nothing typed        | ~75 ms + ~10 ms children     | ~370             | +10 MB while open, freed on close   |
+| open, type an app name, close        | ~140 ms                      | ~850             |                                     |
+| open, `f report`, close              | ~125 ms + ~105 ms (`fd`, `plocate`) | ~670      |                                     |
+| the plugin's `list`, when it runs    | +1.2 s                       |                  |                                     |
+
+A plugin's `list` runs in parallel with the window and is what costs the most; give slow plugins a
+`refresh` interval. Most of the memory is Qt and the Wayland/EGL stack that any Quickshell
+process carries.
+
+To measure on your machine: sum `voluntary_ctxt_switches` + `nonvoluntary_ctxt_switches` over
+`/proc/<pid>/task/*/status` (wakeups) and `utime`, `stime`, `cutime`, `cstime` from `/proc/<pid>/stat`
+(CPU, children included) before and after.
 
 ## License
 

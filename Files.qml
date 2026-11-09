@@ -9,6 +9,9 @@ Singleton {
     id: root
 
     readonly property bool enabled: Settings.s.files?.enabled ?? true
+    // Files show up after the prefix ("f report"); `inline` mixes them into every search
+    readonly property string prefix: Settings.s.files?.prefix ?? "f"
+    readonly property bool inline: enabled && !!Settings.s.files?.inline
     readonly property string tool: Quickshell.shellPath("bin/quickseek-files")
 
     property var live: []        // [{ path, dir }]

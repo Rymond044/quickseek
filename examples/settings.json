@@ -3,6 +3,7 @@
   "fonts": { "text": "Inter", "icons": "Symbols Nerd Font", "size": 11 },
   "launchPrefix": ["uwsm", "app", "--"],
   "emptyView": ["pinned", "recent"],
+  "files": { "prefix": "f", "inline": false },
   "web": {
     "default": "ddg",
     "engines": {
@@ -11,6 +12,6 @@
     }
   },
   "plugins": [
-    { "id": "cc", "name": "Control center", "icon": "󰒓", "command": ["~/.local/bin/my-settings-menu", "quickseek"] }
+    { "id": "cc", "name": "Control center", "icon": "󰒓", "command": ["~/.local/bin/my-settings-menu", "quickseek"], "refresh": 120 }
   ]
 }

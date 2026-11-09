@@ -13,6 +13,9 @@ Scope {
     property var items: []
     property bool loading: lister.running
     property bool stale: false
+    property real listedAt: 0
+    // Seconds a list stays fresh when the window opens; folders of the plugin always re-list
+    readonly property real refresh: config.refresh ?? 0
 
     function parseLines(text) {
         const out = [];
@@ -27,8 +30,10 @@ Scope {
         return out;
     }
 
-    function list() {
-        if (lister.running) { stale = true; return; }
+    // maxAge: skip if the last list is younger (seconds)
+    function list(maxAge) {
+        if (maxAge && listedAt && Date.now() - listedAt < maxAge * 1000) return;
+        if (lister.running) { if (!maxAge) stale = true; return; }
         lister.running = true;
     }
 
@@ -44,6 +49,7 @@ Scope {
         stdout: StdioCollector {
             onStreamFinished: {
                 plugin.items = plugin.parseLines(text);
+                plugin.listedAt = Date.now();
                 if (plugin.stale) { plugin.stale = false; plugin.list(); }
             }
         }

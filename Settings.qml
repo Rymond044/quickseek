@@ -29,7 +29,8 @@ Singleton {
         opener: ["gio", "open"],
         // What an empty query shows: any of "pinned", "recent", "popular", in this order
         emptyView: [],
-        files: { enabled: true },
+        // "f report" searches files only; inline: true adds files to every search
+        files: { enabled: true, prefix: "f", inline: false },
         plugins: [],
         web: {
             default: "g",

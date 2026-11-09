@@ -15,7 +15,11 @@ that folder (Enter or Tab on it, Backspace on an empty query to leave).
 
 ## `list`
 
-Called every time the window opens and after every action. Prints the whole tree:
+Called when the window opens, when one of the plugin's folders is entered and after every action.
+A slow `list` (many shell-outs) costs CPU on every open; `"refresh": 120` in the plugin's settings
+skips the call on open while the last list is younger than that many seconds. Entering the plugin's
+folders and running its items still re-list, so statuses there stay current.
+Prints the whole tree:
 
 ```json
 {"id": "wifi", "title": "Wi-Fi", "status": "HomeNet", "icon": "󰖩", "folder": true, "keywords": "wireless network"}

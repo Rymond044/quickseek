@@ -25,6 +25,11 @@ ShellRoot {
         // Open straight into a folder, e.g. "plugin:cc" or "plugin:cc:wifi"
         function folder(key: string): void { Engine.open(key); }
         function search(text: string): void { Engine.open(); Engine.setQuery(text); }
+        // What the window shows, for scripts and tests: folder, query, then one row per line
+        function rows(): string {
+            return [`${Engine.folder?.key ?? ""}\t${Engine.query}`].concat(Engine.rows.map((r, n) =>
+                r.header ? "# " + r.header : `${n === Engine.sel ? ">" : " "} ${r.item.title}\t${r.item.status ?? ""}`)).join("\n");
+        }
     }
 
     LazyLoader {
