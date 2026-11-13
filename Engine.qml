@@ -29,14 +29,33 @@ Singleton {
     property int menuSeq: 0
     property var calc: null        // { query, result }
 
+    // Preview (Space): opens only after moving through the list with keys, so a space
+    // typed into the query stays a space; follows the selection while open
+    signal queryReplaced()
+    signal typeRequested(string text)   // IPC "type": goes through the field like typing
+    property string fieldText: ""       // what the search field shows (tests)
+    property bool listMode: false
+    // Opened straight into a folder (Super+V…): Esc there closes instead of going up
+    property int baseDepth: 0
+    property bool previewOpen: false
+    readonly property var previewItem: previewOpen && previewable(current) ? current : null
+    onStackChanged: previewOpen = false
+
+    function previewable(i) {
+        return !!i && ((i.kind === "file" && !i.dir) || i.kind === "clip");
+    }
+
     // ------------------------------------------------------------------ window
 
     function open(folderKey) {
         query = "";
+        listMode = false;
+        previewOpen = false;
         prompt = null;
         confirmKey = "";
         clearMenus();
         stack = folderKey && byKey[folderKey] ? [folderKey] : [];
+        baseDepth = stack.length;
         fileCache = {};
         if (Files.inline || stack[0] === "files") Files.open();
         for (const p of plugins) p.list(p.refresh);
@@ -74,6 +93,30 @@ Singleton {
         shown = false;
     }
 
+    // The window stays mapped (invisible, still holding the keyboard) until every key pressed
+    // in it is released: otherwise the release, or the rest of a key press, lands in the window below.
+    property var held: ({})
+    property bool unmapPending: false
+    function keyDown(key) { held[key] = true; }
+    function keyUp(key) {
+        delete held[key];
+        if (unmapPending && !Object.keys(held).length) unmap();
+    }
+    function unmap() {
+        unmapTimer.stop();
+        unmapPending = false;
+        if (shown) return;
+        held = {};
+        mapped = false;
+    }
+    function closed() {
+        unmapPending = true;
+        if (Object.keys(held).length) unmapTimer.restart();
+        else unmap();
+    }
+    // In case a release never arrives (focus taken away)
+    Timer { id: unmapTimer; interval: 1500; onTriggered: root.unmap() }
+
     function toggle() {
         shown || opening ? close() : open();
     }
@@ -108,6 +151,11 @@ Singleton {
         function onPinsChanged() { rebuildTimer.restart(); }
     }
     Connections {
+        target: Clipboard
+        function onUpdated() { if (root.shown && root.folder?.key === "clipboard") root.refresh(true); }
+        function onAvailableChanged() { rebuildTimer.restart(); }
+    }
+    Connections {
         target: Files
         function onUpdated() { if (root.shown) root.refresh(true); }
         function onIndexingChanged() { rebuildTimer.restart(); }
@@ -128,7 +176,8 @@ Singleton {
     }
 
     function appItems() {
-        return DesktopEntries.applications.values.filter(e => !e.noDisplay).map(e => make({
+        const hidden = Settings.s.hidden ?? [];
+        return DesktopEntries.applications.values.filter(e => !e.noDisplay && !hidden.includes("app:" + e.id)).map(e => make({
             key: "app:" + e.id,
             kind: "app",
             group: "Applications",
@@ -140,22 +189,38 @@ Singleton {
         }));
     }
 
+    // Session actions live in the "session" folder and show up in search like any folder child.
+    // settings.power: id -> command, or { title, icon, keywords, confirm, order, command }; null hides one.
     function powerItems() {
-        const defs = [
-            ["lock", "Lock", "󰌾", "screen", false],
-            ["suspend", "Suspend", "󰤄", "sleep", false],
-            ["reboot", "Restart", "󰜉", "reboot", true],
-            ["shutdown", "Shut down", "󰐥", "power off poweroff", true],
-            ["logout", "Log out", "󰍃", "exit sign out session", true]
-        ];
-        return defs.map(([id, title, icon, kw, confirm]) => make({
-            key: "power:" + id,
-            kind: "power",
-            group: "System",
-            title, icon, keywords: kw, confirm,
-            iconType: "glyph",
-            command: Settings.s.power[id]
-        }));
+        const defs = {
+            lock: ["Lock", "󰌾", "screen", false],
+            suspend: ["Suspend", "󰤄", "sleep", false],
+            reboot: ["Restart", "󰜉", "reboot", true],
+            shutdown: ["Shut down", "󰐥", "power off poweroff", true],
+            logout: ["Log out", "󰍃", "exit sign out session", true]
+        };
+        const out = [make({ key: "session", kind: "folder", folder: true, group: "System", title: "Session",
+            icon: "󰐥", iconType: "glyph", keywords: "power menu shutdown restart lock" })];
+        let n = 0;
+        for (const [id, v] of Object.entries(Settings.s.power ?? {})) {
+            const o = Array.isArray(v) ? { command: v } : v;
+            if (!o?.command) continue;
+            const d = defs[id] ?? [];
+            out.push(make({
+                key: "power:" + id,
+                kind: "power",
+                group: "System",
+                ancestors: ["session"],
+                order: o.order ?? 10 * n++,
+                title: o.title ?? d[0] ?? id,
+                icon: o.icon ?? d[1] ?? "󰐥",
+                keywords: o.keywords ?? d[2] ?? "",
+                confirm: o.confirm ?? d[3] ?? false,
+                iconType: "glyph",
+                command: o.command
+            }));
+        }
+        return out;
     }
 
     // ---- files
@@ -239,7 +304,7 @@ Singleton {
     }
 
     function pinnable(i) {
-        return !!i && !i.key.startsWith("menu:") && i.kind !== "web" && i.kind !== "calc";
+        return !!i && !i.key.startsWith("menu:") && !["web", "calc", "clip", "cmd", "emoji"].includes(i.kind);
     }
 
     function togglePin(i) {
@@ -263,6 +328,139 @@ Singleton {
         return [make({ key: "files", kind: "folder", folder: true, group: "Files", title: "Find files",
             status: Files.prefix ? Files.prefix + " …" : "", icon: "\uf07b", iconType: "glyph",
             keywords: "files folders documents search " + Files.prefix })];
+    }
+
+    function clipboardFolder() {
+        if (!Clipboard.available) return [];
+        return [make({ key: "clipboard", kind: "folder", folder: true, group: "Clipboard", title: "Clipboard history",
+            status: Clipboard.prefix ? Clipboard.prefix + " …" : "", icon: "󰅌", iconType: "glyph",
+            keywords: "clipboard paste copy history " + Clipboard.prefix })];
+    }
+
+    function clipItem(e, n) {
+        const one = e.text.replace(/\s+/g, " ").trim();
+        return make({
+            key: "clip:" + e.time + ":" + n,
+            kind: "clip",
+            group: "Clipboard",
+            title: e.image ? "Image" : one.slice(0, 300),
+            keywords: e.image ? "image picture screenshot png" : "",
+            status: (e.pinned ? "pinned · " : "") + Clipboard.age(e.time),
+            icon: e.image || "󰅌",
+            iconType: e.image ? "theme" : "glyph",
+            glyph: "󰋩",
+            entry: e
+        });
+    }
+
+    // Newest first, clipse pins on top; a query ranks by match, then by age
+    function clipRows(raw, q) {
+        const items = Clipboard.entries.map(clipItem);
+        const order = (a, b) => (b.entry.pinned - a.entry.pinned) || (b.entry.time - a.entry.time);
+        if (!q) return items.sort(order).map(item => ({ item }));
+        const alt = Fuzzy.normalize(Fuzzy.swapLayout(raw));
+        const scored = [];
+        for (const i of items) {
+            const fields = [[i.nTitle, 1], [i.nKeywords, 0.7]];
+            let sc = Fuzzy.scoreFields(q, fields);
+            if (alt !== q) sc = Math.max(sc, 0.97 * Fuzzy.scoreFields(alt, fields));
+            if (sc > 0) scored.push({ item: i, score: sc });
+        }
+        scored.sort((a, b) => (b.score - a.score) || order(a.item, b.item));
+        return scored.map(x => ({ item: x.item }));
+    }
+
+    // ---- ":fire" / ":огонь": emoji, Enter copies
+
+    function emojiFolder() {
+        if (!Emoji.enabled) return [];
+        return [make({ key: "emoji", kind: "folder", folder: true, group: "Emoji", title: "Emoji",
+            status: Emoji.prefix + " …", icon: "😀", iconType: "emoji", keywords: "emoji smiley symbols эмодзи смайлы " + Emoji.prefix })];
+    }
+
+    property var emojiItems: []
+    Connections {
+        target: Emoji
+        function onUpdated() {
+            root.emojiItems = Emoji.items.map((e, n) => root.make({ key: "emoji:" + e.char, kind: "emoji", group: "Emoji",
+                title: e.name, keywords: e.keywords, status: e.ru, nRu: Fuzzy.normalize(e.ru), icon: e.char, iconType: "emoji", order: n }));
+            if (root.folder?.key === "emoji") root.refresh(false);
+        }
+    }
+
+    // Empty query: recently used first, then all in Unicode order
+    function emojiRows(raw, q) {
+        if (!q) {
+            const recent = History.recent().filter(k => k.startsWith("emoji:")).slice(0, 16);
+            const byChar = {};
+            for (const i of emojiItems) byChar[i.key] = i;
+            const top = recent.map(k => byChar[k]).filter(i => i);
+            const out = [];
+            if (top.length) out.push({ header: "Recent" }, ...top.map(item => ({ item })), { header: "All" });
+            return out.concat(emojiItems.map(item => ({ item })));
+        }
+        const alt = Fuzzy.normalize(Fuzzy.swapLayout(raw));
+        const scored = [];
+        for (const i of emojiItems) {
+            const fields = [[i.nTitle, 1], [i.nRu, 1], [i.nKeywords, 0.8]];
+            let sc = Fuzzy.scoreFields(q, fields);
+            if (alt !== q) sc = Math.max(sc, 0.97 * Fuzzy.scoreFields(alt, fields));
+            if (sc > 0) scored.push({ item: i, score: sc + History.frecency(i.key) });
+        }
+        scored.sort((a, b) => (b.score - a.score) || (a.item.order - b.item.order));
+        return scored.slice(0, 200).map(x => ({ item: x.item }));
+    }
+
+    // ---- "> command": runs in a terminal, the shell stays open afterwards
+
+    readonly property string commandPrefix: Settings.s.command?.prefix ?? ">"
+    property var executables: []
+
+    function commandFolder() {
+        if (!commandPrefix) return [];
+        return [make({ key: "command", kind: "folder", folder: true, group: "Command", title: "Run command",
+            status: commandPrefix + " …", icon: "\uf120", iconType: "glyph", keywords: "terminal shell run execute " + commandPrefix })];
+    }
+
+    function cmdItem(text, status) {
+        return make({ key: "cmd:" + text, kind: "cmd", group: "Command", title: text, status,
+            icon: "\uf120", iconType: "glyph", command: text });
+    }
+
+    // What is typed, then past commands containing it (frecency), then programs from $PATH
+    // starting with it (Tab puts one into the query)
+    function commandRows(raw) {
+        const t = raw.trim();
+        const out = [];
+        if (t) out.push({ item: cmdItem(t, "run in terminal"), big: true });
+        const lt = t.toLowerCase();
+        const past = History.recent().filter(k => k.startsWith("cmd:")).map(k => k.slice(4))
+            .filter(c => c !== t && c.toLowerCase().includes(lt))
+            .sort((a, b) => History.frecency("cmd:" + b) - History.frecency("cmd:" + a));
+        if (past.length) out.push({ header: "History" });
+        for (const c of past.slice(0, 50)) out.push({ item: cmdItem(c, "") });
+        if (t && !/\s/.test(t)) {
+            const progs = executables.filter(e => e.startsWith(t) && e !== t && !past.includes(e)).slice(0, 30);
+            if (progs.length) out.push({ header: "Programs" });
+            for (const e of progs) out.push({ item: cmdItem(e, "") });
+        }
+        return out;
+    }
+
+    function runCommand(text) {
+        const sh = Quickshell.env("SHELL") || "sh";
+        launch((Settings.s.terminal ?? ["kitty", "-e"]).concat([sh, "-ic", text + "; exec " + sh]));
+    }
+
+    Process {
+        id: pathProc
+        command: ["sh", "-c", 'IFS=:; for d in $PATH; do [ -d "$d" ] && ls -1 -- "$d"; done 2>/dev/null | sort -u']
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.executables = text.split("\n").filter(x => x);
+                if (root.folder?.key === "command") root.refresh(true);
+            }
+        }
     }
 
     function settingsItems() {
@@ -291,6 +489,9 @@ Singleton {
                 { order: 2, icon: "\uf021", status: Files.indexing ? "…" : "", keywords: "files update" }),
             toggle("unpin", "Unpin all", false, () => History.unpinAll(),
                 { order: 3, icon: "\uf08d", status: History.pins.length ? String(History.pins.length) : "", confirm: true, keywords: "pins" }),
+            toggle("hidden", "Show hidden apps", false, () => Settings.set(["hidden"], []),
+                { order: 5, icon: "\uf06e", status: (Settings.s.hidden ?? []).length ? String(Settings.s.hidden.length) : "",
+                  keywords: "unhide applications" }),
             toggle("history", "Clear history", false, () => History.clear(),
                 { order: 4, icon: "\uf1da", status: "", confirm: true, keywords: "frecency forget" }),
             toggle("file", "Open settings file", false, null,
@@ -348,7 +549,7 @@ Singleton {
     }
 
     function rebuild() {
-        let list = appItems().concat(powerItems(), filesFolder(), settingsItems());
+        let list = appItems().concat(powerItems(), filesFolder(), clipboardFolder(), commandFolder(), emojiFolder(), settingsItems());
         for (const p of plugins) list = list.concat(pluginItems(p));
         list = list.concat(menuItems);
         const map = {};
@@ -409,6 +610,9 @@ Singleton {
 
         const q = Fuzzy.normalize(raw);
         if (f?.key === "files") return fileRows(raw, q);
+        if (f?.key === "clipboard") return clipRows(raw, q);
+        if (f?.key === "command") return commandRows(query);
+        if (f?.key === "emoji") return emojiRows(raw, q);
         if (!q) return f ? childrenOf(f).map(item => ({ item })) : emptyRows();
 
         const alt = Fuzzy.normalize(Fuzzy.swapLayout(raw));
@@ -434,7 +638,8 @@ Singleton {
             top = prefixed;
             out.push({ header: "Top hit" }, { item: top, big: true });
         } else if (calc && calc.query === raw) {
-            top = make({ key: "calc", kind: "calc", group: "Calculator", title: calc.result, status: "copy", icon: "󰃬", iconType: "glyph" });
+            const rates = ratesDate && isMoney(calc.query + " " + calc.result) ? "rates " + ratesDate : "";
+            top = make({ key: "calc", kind: "calc", group: "Calculator", title: calc.result, status: rates || "copy", icon: "󰃬", iconType: "glyph" });
             out.push({ header: "Calculator" }, { item: top, big: true });
         } else if (scored.length) {
             top = scored[0].item;
@@ -526,24 +731,204 @@ Singleton {
     }
 
     function setQuery(q) {
-        if (!prompt && !folder && filePrefix(q)) {
-            const rest = q.replace(/^\s*\S+\s+/, "");
-            enter(byKey["files"]);
-            savedQuery["files"] = "";
-            q = rest;
+        const pf = !prompt && !folder ? prefixFolder(q) : null;
+        if (pf) {
+            enter(byKey[pf.key]);
+            savedQuery[pf.key] = "";
+            q = pf.rest;
         }
         query = q;
+        // The field still shows the prefix when the query itself did not change (">" typed first)
+        if (pf) queryReplaced();
         confirmKey = "";
+        listMode = false;
         if (!prompt && (folder?.key === "files" || (!folder && Files.inline))) Files.search(fileQueries(q));
         refresh(false);
         if (!prompt && !folder && looksLikeMath(q.trim())) calcTimer.restart();
     }
 
-    // "f " or the same key in the other layout ("а "); a web engine with that name wins
-    function filePrefix(q) {
+    // Folders behind a prefix. A word prefix needs a space after it and also works in the other
+    // layout ("f " / "а "); a web engine with that name wins. A symbol prefix works at once (":fire").
+    function prefixFolder(q) {
+        const words = [["files", Files.prefix], ["clipboard", Clipboard.prefix]];
         const m = q.match(/^\s*(\S+)\s/);
-        if (!m || !byKey["files"] || !Files.prefix || engines[m[1]]) return false;
-        return m[1] === Files.prefix || Fuzzy.swapLayout(m[1]) === Files.prefix;
+        if (m && !engines[m[1]])
+            for (const [key, p] of words)
+                if (p && byKey[key] && (m[1] === p || Fuzzy.swapLayout(m[1]) === p))
+                    return { key, rest: q.slice(m[0].length) };
+        for (const [key, p] of symbolPrefixes())
+            if (p && byKey[key] && q.startsWith(p)) return { key, rest: q.slice(p.length).replace(/^\s+/, "") };
+        return null;
+    }
+
+    function symbolPrefixes() {
+        return [["command", commandPrefix], ["emoji", Emoji.prefix]];
+    }
+
+    // ------------------------------------------------------------------ keys
+
+    // Keys of the search field; true = handled. `atEnd`: the text cursor is at the end.
+    function onKey(k, mods, atEnd, empty) {
+        const ctrl = mods & Qt.ControlModifier;
+        if (!shown) return true;   // closing: swallow everything until the window is gone
+        if (k === Qt.Key_Space && !mods && listMode && !prompt && previewable(current)) {
+            previewOpen = !previewOpen;
+            return true;
+        }
+        if (k === Qt.Key_Escape) {
+            // Out of a preview, prompt, menu or folder first; close from the top
+            if (!previewOpen && !prompt && stack.length <= baseDepth) close();
+            else if (!back()) close();
+        } else if (k === Qt.Key_Down || (ctrl && k === Qt.Key_J) || (ctrl && k === Qt.Key_N)) {
+            move(1);
+        } else if (k === Qt.Key_Up || (ctrl && k === Qt.Key_K)) {
+            move(-1);
+        } else if (k === Qt.Key_Return || k === Qt.Key_Enter) {
+            activate(null, mods & Qt.AltModifier);
+        } else if (ctrl && k === Qt.Key_P) {
+            togglePin(current);
+        } else if ((ctrl && k === Qt.Key_O) || (k === Qt.Key_Right && atEnd && !prompt)) {
+            return openActions();
+        } else if (k === Qt.Key_Tab) {
+            // In the command folder Tab completes the query with the selected command
+            if (folder?.key === "command" && current?.kind === "cmd") setQuery(current.command + " ");
+            else enter(current);
+        } else if (k === Qt.Key_Backspace && empty) {
+            back();
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    // The same from IPC, for scripts and tests: "esc", "down", "ctrl+o", "alt+enter"…
+    function pressKey(name) {
+        const keys = { esc: Qt.Key_Escape, tab: Qt.Key_Tab, enter: Qt.Key_Return, up: Qt.Key_Up, down: Qt.Key_Down,
+            left: Qt.Key_Left, right: Qt.Key_Right, space: Qt.Key_Space, backspace: Qt.Key_Backspace };
+        const parts = name.toLowerCase().split("+");
+        const last = parts.pop();
+        let mods = 0;
+        for (const m of parts) mods |= m === "ctrl" ? Qt.ControlModifier : m === "alt" ? Qt.AltModifier : m === "shift" ? Qt.ShiftModifier : 0;
+        const k = keys[last] ?? (last.length === 1 ? last.toUpperCase().charCodeAt(0) : 0);
+        return onKey(k, mods, true, !query);
+    }
+
+    // ------------------------------------------------------------------ actions menu
+
+    // → or Ctrl+O on a result: what else can be done with it. A menu is a folder on the stack
+    // like a plugin menu, so Esc and Backspace lead back.
+    function openActions(item) {
+        item = item ?? current;
+        if (!item || prompt || item.kind === "action" || item.key.startsWith("menu:")) return false;
+        const acts = actionsFor(item);
+        if (!acts.length) return false;
+        showMenu(item.title, acts);
+        return true;
+    }
+
+    function showMenu(title, acts) {
+        const key = "menu:" + (++menuSeq);
+        const menu = make({ key, kind: "folder", folder: true, title, ancestors: [] });
+        menuItems = menuItems.concat([menu], acts.map((a, n) => make(Object.assign({
+            key: key + ":" + n, kind: "action", group: "Actions", ancestors: [key], order: n, iconType: "glyph"
+        }, a))));
+        savedQuery[key] = query;
+        stack = stack.concat([key]);
+        query = "";
+        rebuild();
+    }
+
+    function copyText(t) {
+        Quickshell.execDetached(["wl-copy", "--", t]);
+    }
+
+    function inTerminal(dir) {
+        Quickshell.execDetached(["sh", "-c", 'cd "$1" || exit; shift; exec "$@"', "sh", dir]
+            .concat(Settings.s.launchPrefix ?? [], Settings.s.terminal ?? ["kitty", "-e"], [Quickshell.env("SHELL") || "sh"]));
+    }
+
+    function actionsFor(i) {
+        const a = [];
+        const add = (title, icon, run, extra) => a.push(Object.assign({ title, icon, run }, extra ?? {}));
+        const close = { closes: true };
+        // The item's own action runs where the item was, not inside the menu
+        const main = (title, icon) => add(title, icon, () => { back(); activate(i); return "stay"; });
+        switch (i.kind) {
+        case "file":
+            main("Open", i.dir ? "\uf07c" : "\uf15b");
+            if (!i.dir) add("Open with…", "\uf1b2", () => { openWith(i); return "stay"; });
+            add("Show in folder", "\uf07b", () => showInFolder(i.path), close);
+            if (i.dir) add("Open in terminal", "\uf120", () => inTerminal(i.path), close);
+            add("Copy path", "\uf0c5", () => copyText(i.path), close);
+            add("Copy name", "\uf0c5", () => copyText(i.title), close);
+            add("Move to trash", "\uf1f8", () => {
+                Quickshell.execDetached(["gio", "trash", "--", i.path]);
+                delete fileCache[i.key];
+            }, { confirm: true, keywords: "delete remove" });
+            break;
+        case "app":
+            main("Open", "\uf04b");
+            add("Hide from results", "\uf070", () => Settings.set(["hidden"], (Settings.s.hidden ?? []).concat([i.key])),
+                { keywords: "remove" });
+            break;
+        case "clip":
+            main("Copy", "\uf0c5");
+            add(i.entry.pinned ? "Unpin" : "Pin", "\uf08d", () => Clipboard.edit(i.entry, "pin"));
+            add("Delete from history", "\uf1f8", () => Clipboard.edit(i.entry, "delete"), { keywords: "remove" });
+            break;
+        case "calc":
+            main("Copy result", "\uf0c5");
+            add("Copy as equation", "\uf0c5", () => copyText(calc.query + " = " + i.title), close);
+            break;
+        case "cmd":
+            main("Run in terminal", "\uf120");
+            if (History.items["cmd:" + i.command])
+                add("Remove from history", "\uf1f8", () => { History.forget(i.key); refresh(true); }, { keywords: "delete forget" });
+            break;
+        case "emoji":
+            main("Copy", "\uf0c5");
+            add("Copy name", "\uf0c5", () => copyText(i.title), close);
+            break;
+        case "web":
+            main("Open", "\uf0ac");
+            add("Copy link", "\uf0c1", () => copyText(i.url), close);
+            break;
+        default:
+            if (i.folder) add("Open", "\uf07c", () => { back(); enter(i); return "stay"; });
+            else main("Run", "\uf04b");
+        }
+        if (pinnable(i)) add(History.pinned(i.key) ? "Unpin" : "Pin", "\uf08d", () => togglePin(i), { keywords: "favorite" });
+        return a;
+    }
+
+    // Applications registered for the file's type, the default first
+    function openWith(i) {
+        openWithProc.path = i.path;
+        openWithProc.title = i.title;
+        openWithProc.running = true;
+    }
+
+    Process {
+        id: openWithProc
+        property string path
+        property string title
+        command: ["sh", "-c", 't=$(gio info -a standard::content-type -- "$1" | sed -n "s/^ *standard::content-type: //p"); ' +
+            'gio mime "$t" 2>/dev/null | sed -n "s/^Default application.*: //p; /^Registered applications:/,/^\$/s/^\t//p; /^Recommended applications:/,/^\$/s/^\t//p"',
+            "sh", path]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const ids = [...new Set(text.split("\n").map(x => x.trim().replace(/\.desktop$/, "")).filter(x => x))];
+                const acts = [];
+                for (const id of ids) {
+                    const e = DesktopEntries.byId(id);
+                    if (!e) continue;
+                    acts.push({ title: e.name, icon: e.icon, iconType: "theme", glyph: "\uf2d0", closes: true,
+                        run: () => root.launch((Settings.s.launchPrefix ?? []).length
+                            ? [id + ".desktop", openWithProc.path] : ["gtk-launch", id, openWithProc.path]) });
+                }
+                if (root.shown && acts.length) root.showMenu("Open " + openWithProc.title + " with", acts);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ calculator
@@ -552,7 +937,7 @@ Singleton {
         if (s.startsWith("=")) return s.length > 1;
         if (!/\d/.test(s)) return false;
         if (/^[\d\s.,+\-*\/^%()]+$/.test(s)) return /[+\-*\/^%]/.test(s.replace(/^-/, ""));
-        if (/^-?[\d.,]+\s*\S+(\s+\S+)?\s+(to|in)\s+\S+/i.test(s)) return true;
+        if (/^[$€£¥₽]?-?[\d.,]+\s*\S+(\s+\S+)?\s+(to|in)\s+\S+/i.test(s)) return true;
         return /^[a-z]+\(.*\d/i.test(s);
     }
 
@@ -581,7 +966,39 @@ Singleton {
                 const r = text.trim().split("\n")[0] ?? "";
                 const same = r.replace(/\s/g, "") === calcProc.expr.replace(/^=|\s/g, "");
                 root.calc = r && !same && /\d/.test(r) && !/error/i.test(r) ? { query: calcProc.expr, result: r } : null;
+                if (root.calc && root.isMoney(calcProc.expr + " " + r)) root.checkRates();
                 if (root.shown && root.query.trim() === calcProc.expr) root.refresh(false);
+            }
+        }
+    }
+
+    // Exchange rates: qalc keeps whatever it downloaded last (could be months old). On a money
+    // query, rates older than a day are fetched in the background and the result recomputed.
+    readonly property string ratesFile: Quickshell.env("HOME") + "/.local/share/qalculate/eurofxref-daily.xml"
+    property string ratesDate: ""
+    property real ratesCheckedAt: 0
+
+    function isMoney(s) {
+        return /[$€£¥₽₴₹₩₺₿]|\b(usd|eur|rub|gbp|jpy|cny|uah|pln|byn|kzt|chf|try|czk|sek|nok|dkk|huf|ron|bgn|cad|aud|nzd|inr|krw|brl|mxn|ils|aed|gel|amd|btc)\b/i.test(s);
+    }
+
+    function checkRates() {
+        if (ratesProc.running || Date.now() - ratesCheckedAt < 3600 * 1000) return;
+        ratesCheckedAt = Date.now();
+        ratesProc.running = true;
+    }
+
+    Process {
+        id: ratesProc
+        // Prints "<date> <updated: 1|0>"
+        command: ["sh", "-c", 'f="$1"; u=0; if [ -z "$(find "$f" -mmin -1440 2>/dev/null)" ]; then ' +
+            'timeout 20 qalc -e >/dev/null 2>&1 </dev/null && u=1; fi; echo "$(date -r "$f" +%F 2>/dev/null) $u"', "sh", root.ratesFile]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const [date, updated] = text.trim().split(" ");
+                root.ratesDate = date ?? "";
+                if (updated === "1" && root.calc) calcTimer.restart();
+                else if (root.shown) root.refresh(true);
             }
         }
     }
@@ -589,6 +1006,7 @@ Singleton {
     // ------------------------------------------------------------------ navigation
 
     function move(d) {
+        listMode = true;
         if (!rows.length) return;
         let i = sel;
         do i += d; while (i >= 0 && i < rows.length && !rows[i].item);
@@ -610,17 +1028,24 @@ Singleton {
             Files.open();
             Files.search([""]);
         }
+        if (item.key === "clipboard") Clipboard.load();
+        if (item.key === "command" && !pathProc.running) pathProc.running = true;
+        if (item.key === "emoji") Emoji.load();
         query = "";
         refresh(false);
         return true;
     }
 
     function back() {
+        if (previewOpen) { previewOpen = false; return true; }
         if (prompt) { prompt = null; query = ""; refresh(false); return true; }
         if (!stack.length) return false;
         const top = stack[stack.length - 1];
         stack = stack.slice(0, -1);
-        if (top.startsWith("menu:")) clearMenus();
+        if (top.startsWith("menu:")) {
+            menuItems = menuItems.filter(i => i.key !== top && !i.ancestors.includes(top));
+            rebuild();
+        }
         query = savedQuery[top] ?? "";
         delete savedQuery[top];
         refresh(false);
@@ -645,8 +1070,21 @@ Singleton {
         if (item.action === "back") { back(); return; }
         if (item.confirm && confirmKey !== item.key) { confirmKey = item.key; return; }
 
-        History.record(item.key, Fuzzy.normalize(query));
+        if (item.kind !== "clip" && item.kind !== "action") History.record(item.key, Fuzzy.normalize(query));
         switch (item.kind) {
+        case "action":
+            if (item.run() === "stay") return;
+            if (!item.closes) { back(); return; }
+            break;
+        case "clip":
+            Clipboard.copy(item.entry);
+            break;
+        case "cmd":
+            runCommand(item.command);
+            break;
+        case "emoji":
+            copyText(item.icon);
+            break;
         case "file":
             if (alt) showInFolder(item.path);
             else openPath(item.path);

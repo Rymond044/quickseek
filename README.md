@@ -1,7 +1,8 @@
 # quickseek
 
-One search box for Hyprland, built on [Quickshell](https://quickshell.org): apps, files, your own
-settings menus (as plugins), a calculator, power actions and web search, in a small animated window.
+One search box for Hyprland, built on [Quickshell](https://quickshell.org): apps, files, clipboard
+history, emoji, shell commands, your own settings menus (as plugins), a calculator, session actions and
+web search, in a small animated window.
 
 <p align="center"><img src="docs/media/demo.webp" width="736" alt="quickseek: apps, calculator, wrong layout, web, a plugin folder"></p>
 
@@ -10,7 +11,13 @@ settings menus (as plugins), a calculator, power actions and web search, in a sm
   plus a live look at Downloads, Desktop and Documents.
 - Learns what you pick (frecency) and which item you pick for a query. Ctrl+P pins anything to the top.
 - Typed in the wrong keyboard layout? `цфддзфзук` finds the same as `wallpaper` (ЙЦУКЕН ↔ QWERTY).
-- Calculator and unit conversion through `qalc`: `2^10`, `5 km to mi`, `=sqrt(2)`. Enter copies the result.
+- Calculator and unit conversion through `qalc`: `2^10`, `5 km to mi`, `=sqrt(2)`, `100 usd to eur`
+  (exchange rates older than a day are refreshed in the background). Enter copies the result.
+- Clipboard history from [clipse](https://github.com/savedra1/clipse) after `v `, emoji with English
+  and Russian names after `:` (`:fire`, `:огонь`), a shell command in a terminal after `>`.
+- → or Ctrl+O on any result: what else can be done with it (open with, copy path, trash, hide, unpin…).
+- Space after moving through the list previews the selected file or clipboard entry: text, images,
+  a PDF's first page, a video frame. Beside the window when the screen has room, else in its place.
 - Web: the last row is always "Search Google for …"; prefixes `g`, `yt`, `aw` (Arch Wiki).
 - Plugins are plain executables speaking JSON Lines, see [docs/plugins.md](docs/plugins.md).
 - Runs as a daemon with no timers or polling: idle means zero CPU and no wakeups. The window is
@@ -30,7 +37,8 @@ settings menus (as plugins), a calculator, power actions and web search, in a sm
 ## Requirements
 
 Hyprland, Quickshell ≥ 0.3, a Nerd Font for glyph icons. Optional: `fd` and `plocate` (files),
-`qalc` (libqalculate), `wl-copy`.
+`qalc` (libqalculate), `wl-copy`, `clipse` (clipboard history), `file` (preview; `pdftoppm`,
+`ffmpeg`, `vipsthumbnail` for PDF pages, video frames and other image formats), an emoji font.
 
 Icons come from the Qt icon theme. If file and folder icons show up as plain glyphs, Qt has no
 theme: set `QT_QPA_PLATFORMTHEME` (e.g. `kde`, `gtk3`) or `QS_ICON_THEME=Adwaita` for the daemon.
@@ -51,7 +59,8 @@ hl.bind("SUPER + ALT + Space", hl.dsp.global("quickseek:toggle"))
 or the classic config: `bind = SUPER ALT, Space, global, quickseek:toggle`.
 
 IPC: `qs -p ~/Apps/quickseek ipc call quickseek toggle|open|close`, `… folder plugin:<id>`,
-`… folder files`, `… search <text>`; `… rows` prints what the window shows (for scripts and tests).
+`… folder files|clipboard|command|emoji|session`, `… search <text>`. For scripts and tests: `… rows`
+prints what the window shows, `… key esc|down|ctrl+o|…` presses a key, `… type <text>` sets the query.
 
 Under uwsm, start the daemon with `uwsm app -s b -- qs -p ~/Apps/quickseek -n` and set
 `"launchPrefix": ["uwsm", "app", "--"]`, so apps get their own scope instead of living in quickseek's.
@@ -63,11 +72,17 @@ Under uwsm, start the daemon with `uwsm app -s b -- qs -p ~/Apps/quickseek -n` a
 | ↑ ↓, Ctrl+K Ctrl+J            | move                                        |
 | Enter                         | run / open folder                           |
 | Alt+Enter                     | show a file in its folder                   |
+| → at the end of the query, Ctrl+O | actions for the selected result         |
+| Space after ↑ ↓               | preview the selected file or clipboard entry |
 | Ctrl+P                        | pin / unpin                                 |
-| Tab                           | open folder                                 |
-| `f` and a space               | search files only                           |
+| Tab                           | open folder; in `>` complete the command    |
+| `f` + space, `v` + space      | search files / clipboard history only       |
+| `:` / `>`                     | emoji / run a command in a terminal         |
 | Backspace on an empty query   | leave the folder                            |
-| Esc                           | close                                       |
+| Esc                           | close the preview, leave the folder, menu or prompt; close from the top |
+
+The window stays mapped until every key pressed in it is released, so nothing typed into quickseek
+ends up in the window below.
 
 Restart, Shut down and Log out ask for a second Enter.
 
@@ -115,7 +130,12 @@ systemctl --user enable --now quickseek-index.timer
 | `files`        | `{ "enabled": true, "prefix": "f", "inline": false }` | file search, see [Files](#files)  |
 | `plugins`      | `[]`                            | see [docs/plugins.md](docs/plugins.md); `"refresh": 120` lists a slow plugin at most every 2 min on open |
 | `web`          | Google, YouTube, Arch Wiki      | `{ "default": "g", "engines": { "g": { "name", "url": "…%s" } } }` |
-| `power`        | systemctl / loginctl            | commands for `lock`, `suspend`, `reboot`, `shutdown`, `logout` |
+| `clipboard`    | `{ "enabled": true, "prefix": "v", "file": "~/.config/clipse/clipboard_history.json" }` | clipse history |
+| `emoji`        | `{ "prefix": ":" }`             | `""` turns emoji off                                |
+| `command`      | `{ "prefix": ">" }`             | `""` turns commands off                             |
+| `terminal`     | `["kitty", "-e"]`               | runs a command in a terminal (the command is appended) |
+| `hidden`       | `[]`                            | apps hidden with the actions menu (`"app:<desktop id>"`) |
+| `power`        | systemctl / loginctl            | the Session folder: `lock`, `suspend`, `reboot`, `shutdown`, `logout` → a command; `null` hides one; a new id with `{ "title", "icon", "command", "order", "confirm" }` adds one |
 | `include`      | `[]`                            | more JSON files merged on top (watched too)         |
 
 Search for `quickseek settings` to change the empty screen and file search, rebuild the index,
@@ -162,4 +182,6 @@ To measure on your machine: sum `voluntary_ctxt_switches` + `nonvoluntary_ctxt_s
 
 ## License
 
-MIT
+MIT. `data/emoji.tsv` is built by `tools/emoji.py` from [emojibase-data](https://emojibase.dev) (MIT),
+whose names and keywords come from [Unicode CLDR](https://cldr.unicode.org)
+([Unicode License v3](https://www.unicode.org/license.txt)).

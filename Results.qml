@@ -81,9 +81,17 @@ ListView {
                 }
 
                 // Glyph icons sit on a tinted rounded tile, like settings icons
+                // Emoji draw themselves, no tile
+                Text {
+                    visible: row.item?.iconType === "emoji"
+                    anchors.centerIn: parent
+                    text: visible ? row.item.icon : ""
+                    font.pixelSize: Math.round(icon.size * 0.8)
+                }
+
                 Rectangle {
                     id: tile
-                    visible: !image.ok
+                    visible: !image.ok && row.item?.iconType !== "emoji"
                     readonly property color tint: row.item ? Theme.tint(list.tintKey(row.item)) : Theme.accent
                     anchors.fill: parent
                     radius: Math.round(parent.size * 0.26)

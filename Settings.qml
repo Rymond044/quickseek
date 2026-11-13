@@ -27,6 +27,10 @@ Singleton {
         launchPrefix: [],
         // Opens files, folders and URLs. gio runs Terminal=true apps (nvim) in a terminal, xdg-open does not
         opener: ["gio", "open"],
+        // Runs a command in a terminal: the command is appended
+        terminal: ["kitty", "-e"],
+        // Applications hidden from results (keys like "app:firefox"), see the actions menu
+        hidden: [],
         // What an empty query shows: any of "pinned", "recent", "popular", in this order
         emptyView: [],
         // "f report" searches files only; inline: true adds files to every search

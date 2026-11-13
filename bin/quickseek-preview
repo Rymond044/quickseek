@@ -1,0 +1,49 @@
+#!/bin/sh
+# Preview of a file for quickseek (Space on a result).
+#   quickseek-preview PATH
+# First line: "kind<TAB>mime<TAB>size<TAB>mtime<TAB>image", then for text files their beginning.
+# kind: image | text | pdf | video | other; image: what to show (the file itself or a cached
+# thumbnail of a PDF page or a video frame). Needs `file`; pdftoppm and ffmpeg when present.
+set -u
+
+f=$1
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/quickseek/preview
+max_text=65536
+
+[ -f "$f" ] || { printf 'other\t\t0\t0\t\n'; exit 0; }
+size=$(stat -c %s -- "$f")
+mtime=$(stat -c %Y -- "$f")
+mime=$(file -b --mime-type -- "$f")
+
+thumb() {
+    mkdir -p "$cache"
+    # Old thumbnails go away now and then
+    find "$cache" -type f -mtime +14 -delete 2>/dev/null
+    t=$cache/$(printf '%s %s' "$f" "$mtime" | md5sum | cut -c1-32).png
+    [ -s "$t" ] || "$@" "$t" >/dev/null 2>&1 </dev/null || rm -f "$t"
+    [ -s "$t" ] && printf '%s' "$t"
+}
+
+pdf_page() { pdftoppm -png -singlefile -f 1 -l 1 -scale-to 1200 "$f" "${1%.png}"; }
+video_frame() { ffmpeg -nostdin -loglevel error -y -ss 3 -i "$f" -frames:v 1 -vf 'scale=1200:-2' "$1" ||
+    ffmpeg -nostdin -loglevel error -y -i "$f" -frames:v 1 -vf 'scale=1200:-2' "$1"; }
+
+case $mime in
+image/svg*|image/png|image/jpeg|image/gif|image/webp|image/bmp|image/avif|image/x-icon|image/vnd.microsoft.icon)
+    printf 'image\t%s\t%s\t%s\t%s\n' "$mime" "$size" "$mtime" "$f" ;;
+image/*)
+    printf 'image\t%s\t%s\t%s\t%s\n' "$mime" "$size" "$mtime" "$(thumb vipsthumbnail "$f" --size 1200 -o)" ;;
+application/pdf)
+    img=$(command -v pdftoppm >/dev/null && thumb pdf_page)
+    printf 'pdf\t%s\t%s\t%s\t%s\n' "$mime" "$size" "$mtime" "$img" ;;
+video/*)
+    img=$(command -v ffmpeg >/dev/null && thumb video_frame)
+    printf 'video\t%s\t%s\t%s\t%s\n' "$mime" "$size" "$mtime" "$img" ;;
+*)
+    if [ "$(file -b --mime-encoding -- "$f")" != binary ]; then
+        printf 'text\t%s\t%s\t%s\t\n' "$mime" "$size" "$mtime"
+        head -c "$max_text" -- "$f"
+    else
+        printf 'other\t%s\t%s\t%s\t\n' "$mime" "$size" "$mtime"
+    fi ;;
+esac

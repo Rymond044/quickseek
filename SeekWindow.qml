@@ -15,18 +15,29 @@ PanelWindow {
     readonly property int maxListHeight: Settings.s.maxRows * rowHeight + 2 * headerHeight + 12
     // Room around the plate for the shadow
     readonly property int pad: Settings.s.shadow ? 28 : 0
+    readonly property int plateWidth: Math.min(Settings.s.width, (screen?.width ?? 1000) - 32)
+    // Preview beside the window when the screen has room on both sides (the window stays where
+    // it is, so the layer grows symmetrically); otherwise it takes the window's place
+    readonly property int gap: 16
+    readonly property int previewRoom: Math.floor(((screen?.width ?? 1000) - plateWidth) / 2) - gap - Math.max(pad, 24)
+    readonly property bool previewBeside: previewRoom >= 360
+    readonly property int previewWidth: previewBeside ? Math.min(560, previewRoom) : plateWidth
+    readonly property int side: previewBeside ? previewWidth + gap : 0
 
     screen: Quickshell.screens.find(s => s.name === Engine.screenName) ?? Quickshell.screens[0]
     anchors.top: true
     margins.top: Math.round((screen?.height ?? 900) * 0.2) - pad
-    implicitWidth: Math.min(Settings.s.width, (screen?.width ?? 1000) - 32) + 2 * pad
+    implicitWidth: plateWidth + 2 * pad + 2 * side
     implicitHeight: barHeight + maxListHeight + 2 + 2 * pad
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "quickseek"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    mask: Region { item: plate }
+    mask: Region {
+        item: plate
+        Region { item: preview.visible ? preview : null }
+    }
 
     HyprlandFocusGrab {
         windows: [win]
@@ -55,9 +66,9 @@ PanelWindow {
 
     Rectangle {
         id: plate
-        x: win.pad
+        x: win.pad + win.side
         y: win.pad
-        width: parent.width - 2 * win.pad
+        width: win.plateWidth
         height: win.barHeight + win.listHeight()
         // A pill while there is only the search field, like Spotlight
         radius: Engine.rows.length ? 22 : win.barHeight / 2
@@ -70,6 +81,8 @@ PanelWindow {
 
         opacity: 0
         scale: 0.96
+        // Hidden but still holding the keyboard while the preview takes its place
+        visible: !(preview.visible && !win.previewBeside)
         Behavior on height { SpringAnimation { spring: 5; damping: 0.42; epsilon: 0.5 } }
 
         states: State {
@@ -86,7 +99,7 @@ PanelWindow {
                 from: "open"
                 SequentialAnimation {
                     NumberAnimation { properties: "opacity,scale"; duration: 100; easing.type: Easing.InCubic }
-                    ScriptAction { script: Engine.mapped = false }
+                    ScriptAction { script: Engine.closed() }
                 }
             }
         ]
@@ -112,11 +125,33 @@ PanelWindow {
         }
     }
 
+    RectangularShadow {
+        visible: Settings.s.shadow && preview.visible
+        anchors.fill: preview
+        radius: preview.radius
+        offset.y: 8
+        blur: 24
+        spread: -2
+        color: Theme.shadow
+        opacity: preview.opacity
+    }
+
+    Preview {
+        id: preview
+        visible: !!Engine.previewItem && Engine.shown
+        x: win.previewBeside ? plate.x + plate.width + win.gap : plate.x
+        y: win.pad
+        width: win.previewWidth
+        height: win.barHeight + win.maxListHeight
+        opacity: visible ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+    }
+
     // The first frame shows the start state, then animates to "open"
     property bool ready: false
     Component.onCompleted: Qt.callLater(() => ready = true)
     Connections {
         target: Engine
-        function onShownChanged() { if (!Engine.shown && !win.ready) Engine.mapped = false; }
+        function onShownChanged() { if (!Engine.shown && !win.ready) Engine.closed(); }
     }
 }

@@ -25,6 +25,12 @@ ShellRoot {
         // Open straight into a folder, e.g. "plugin:cc" or "plugin:cc:wifi"
         function folder(key: string): void { Engine.open(key); }
         function search(text: string): void { Engine.open(); Engine.setQuery(text); }
+        // A key as if pressed in the window: "esc", "down", "ctrl+o"… (scripts and tests)
+        function key(name: string): bool { return Engine.pressKey(name); }
+        // Replace the text of the open window's field, as if typed
+        function type(text: string): void { Engine.typeRequested(text); }
+        // What the search field shows
+        function field(): string { return Engine.fieldText; }
         // What the window shows, for scripts and tests: folder, query, then one row per line
         function rows(): string {
             return [`${Engine.folder?.key ?? ""}\t${Engine.query}`].concat(Engine.rows.map((r, n) =>

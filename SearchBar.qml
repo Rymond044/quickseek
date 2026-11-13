@@ -54,32 +54,18 @@ Item {
         Component.onCompleted: { text = Engine.query; forceActiveFocus(); }
 
         onTextEdited: Engine.setQuery(text)
+        onTextChanged: Engine.fieldText = text
         Connections {
             target: Engine
             function onQueryChanged() { if (input.text !== Engine.query) input.text = Engine.query; }
+            function onQueryReplaced() { if (input.text !== Engine.query) input.text = Engine.query; }
+            function onTypeRequested(t) { input.text = t; Engine.setQuery(t); }
         }
 
+        Keys.onReleased: e => Engine.keyUp(e.key)
         Keys.onPressed: e => {
-            const ctrl = e.modifiers & Qt.ControlModifier;
-            const k = e.key;
-            if (k === Qt.Key_Escape) {
-                if (!Engine.prompt || !Engine.back()) Engine.close();
-            } else if (k === Qt.Key_Down || (ctrl && k === Qt.Key_J) || (ctrl && k === Qt.Key_N)) {
-                Engine.move(1);
-            } else if (k === Qt.Key_Up || (ctrl && k === Qt.Key_K)) {
-                Engine.move(-1);
-            } else if (k === Qt.Key_Return || k === Qt.Key_Enter) {
-                Engine.activate(null, e.modifiers & Qt.AltModifier);
-            } else if (ctrl && k === Qt.Key_P) {
-                Engine.togglePin(Engine.current);
-            } else if (k === Qt.Key_Tab) {
-                Engine.enter(Engine.current);
-            } else if (k === Qt.Key_Backspace && !text) {
-                Engine.back();
-            } else {
-                return;
-            }
-            e.accepted = true;
+            if (!e.isAutoRepeat) Engine.keyDown(e.key);
+            e.accepted = Engine.onKey(e.key, e.modifiers, cursorPosition === text.length, !text);
         }
 
         Text {

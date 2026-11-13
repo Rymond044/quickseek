@@ -35,6 +35,13 @@ Singleton {
         return Object.keys(items).sort((a, b) => items[b].n - items[a].n || items[b].t - items[a].t);
     }
 
+    function forget(key) {
+        delete items[key];
+        for (const q in queries) delete queries[q][key];
+        items = items;
+        saveTimer.restart();
+    }
+
     function clear() {
         items = {};
         queries = {};
