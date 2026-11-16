@@ -28,6 +28,13 @@ Singleton {
         recentProc.running = true;
     }
 
+    function unload() {
+        live = [];
+        found = [];
+        foundFor = "";
+        pending = "";
+    }
+
     // `queries`: the query and its wrong-layout twin
     function search(queries) {
         const key = queries.join("\n");

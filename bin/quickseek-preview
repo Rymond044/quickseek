@@ -28,6 +28,15 @@ pdf_page() { pdftoppm -png -singlefile -f 1 -l 1 -scale-to 1200 "$f" "${1%.png}"
 video_frame() { ffmpeg -nostdin -loglevel error -y -ss 3 -i "$f" -frames:v 1 -vf 'scale=1200:-2' "$1" ||
     ffmpeg -nostdin -loglevel error -y -i "$f" -frames:v 1 -vf 'scale=1200:-2' "$1"; }
 
+# Big pictures: show a cached 1200 px thumbnail, so quickseek does not decode a 4K image in its own memory
+case $mime in
+image/jpeg|image/png|image/webp|image/bmp|image/avif)
+    if [ "$size" -gt 1048576 ] && command -v vipsthumbnail >/dev/null; then
+        img=$(thumb vipsthumbnail "$f" --size 1200 -o)
+        [ -n "$img" ] && { printf 'image\t%s\t%s\t%s\t%s\n' "$mime" "$size" "$mtime" "$img"; exit 0; }
+    fi ;;
+esac
+
 case $mime in
 image/svg*|image/png|image/jpeg|image/gif|image/webp|image/bmp|image/avif|image/x-icon|image/vnd.microsoft.icon)
     printf 'image\t%s\t%s\t%s\t%s\n' "$mime" "$size" "$mtime" "$f" ;;

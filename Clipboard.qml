@@ -22,6 +22,10 @@ Singleton {
         if (enabled) view.reload();
     }
 
+    function unload() {
+        entries = [];
+    }
+
     function parse(text) {
         let list = [];
         try {

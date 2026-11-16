@@ -43,5 +43,15 @@ ShellRoot {
         SeekWindow {}
     }
 
+    // Built-in sources a plugin mounts as folders: loaded only while the window is open
+    LazyLoader {
+        active: (Engine.opening || Engine.mapped) && Engine.nativeNames.includes("audio")
+        AudioSource {}
+    }
+    LazyLoader {
+        active: (Engine.opening || Engine.mapped) && Engine.nativeNames.includes("bluetooth")
+        BluetoothSource {}
+    }
+
     Component.onCompleted: History.items
 }

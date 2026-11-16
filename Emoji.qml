@@ -19,6 +19,11 @@ Singleton {
         wanted = true;
     }
 
+    function unload() {
+        wanted = false;
+        items = [];
+    }
+
     FileView {
         path: root.wanted ? Quickshell.shellPath("data/emoji.tsv") : ""
         blockLoading: true

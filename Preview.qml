@@ -127,6 +127,7 @@ Rectangle {
             sourceSize { width: body.width * 2; height: body.height * 2 }
             fillMode: Image.PreserveAspectFit
             asynchronous: true
+            cache: false
             smooth: true
             mipmap: true
         }

@@ -19,7 +19,8 @@ web search, in a small animated window.
 - Space after moving through the list previews the selected file or clipboard entry: text, images,
   a PDF's first page, a video frame. Beside the window when the screen has room, else in its place.
 - Web: the last row is always "Search Google for …"; prefixes `g`, `yt`, `aw` (Arch Wiki).
-- Plugins are plain executables speaking JSON Lines, see [docs/plugins.md](docs/plugins.md).
+- Plugins are plain executables speaking JSON Lines, see [docs/plugins.md](docs/plugins.md). A plugin
+  can mount built-in folders for sound (PipeWire) and Bluetooth (BlueZ) instead of listing them itself.
 - Runs as a daemon with no timers or polling: idle means zero CPU and no wakeups. The window is
   created on open and destroyed after it closes. See [Cost](#cost).
 
@@ -100,16 +101,9 @@ Trash, Steam, `node_modules`, `.git` and whatever `~/.config/quickseek/ignore` l
 syntax). A query that starts with a dot also searches hidden files up to three levels deep:
 `.zshrc`, `.config`.
 
-The index is rebuilt when the window opens and the index is older than two hours, and from
-"quickseek settings › Rebuild file index". Downloads, Desktop and Documents are listed live on every
-open, so new downloads show up right away. To keep the index fresh without opening the window, enable
-the timer (every 30 min; on battery only when the index is older than 2 h):
-
-```sh
-# edit the path in systemd/quickseek-index.service if quickseek is not in ~/Apps/quickseek
-systemctl --user link ~/Apps/quickseek/systemd/quickseek-index.{service,timer}
-systemctl --user enable --now quickseek-index.timer
-```
+The index is rebuilt when the files folder opens and the index is older than two hours, and from
+"quickseek settings › Rebuild file index". Downloads, Desktop and Documents are listed live every
+time the folder opens, so new downloads show up right away.
 
 ## Settings
 
@@ -171,6 +165,9 @@ out about a hundred times to list a control center. CPU includes child processes
 | open, type an app name, close        | ~140 ms                      | ~850             |                                     |
 | open, `f report`, close              | ~125 ms + ~105 ms (`fd`, `plocate`) | ~670      |                                     |
 | the plugin's `list`, when it runs    | +1.2 s                       |                  |                                     |
+
+Emoji, clipboard and file results are dropped from memory a moment after the window closes. A big
+image preview leaves some memory behind (graphics caches, about 40 MB, reused by the next preview).
 
 A plugin's `list` runs in parallel with the window and is what costs the most; give slow plugins a
 `refresh` interval. Most of the memory is Qt and the Wayland/EGL stack that any Quickshell

@@ -57,9 +57,11 @@ Singleton {
         stack = folderKey && byKey[folderKey] ? [folderKey] : [];
         baseDepth = stack.length;
         fileCache = {};
-        if (Files.inline || stack[0] === "files") Files.open();
+        releaseTimer.stop();
+        if (Files.inline) Files.open();
+        if (stack.length) loadFolder(stack[0]);
         for (const p of plugins) p.list(p.refresh);
-        if (stack.length) pluginOf(stack[0])?.list(2);
+        if (stack.length && !byKey[stack[0]]?.source) pluginOf(stack[0])?.list(2);
         refresh(false);
         if (mapped) { shown = true; return; }
         opening = true;
@@ -108,7 +110,35 @@ Singleton {
         if (shown) return;
         held = {};
         mapped = false;
+        releaseTimer.restart();
     }
+
+    // Folders that read data on demand; the data is dropped again when the window is gone
+    function loadFolder(key) {
+        if (key === "files") {
+            Files.open();
+            Files.search([""]);
+        }
+        if (key === "clipboard") Clipboard.load();
+        if (key === "command" && !pathProc.running) pathProc.running = true;
+        if (key === "emoji") Emoji.load();
+    }
+
+    function release() {
+        if (mapped || shown) return;
+        rows = [];
+        sel = -1;
+        emojiItems = [];
+        Emoji.unload();
+        Clipboard.unload();
+        Files.unload();
+        fileCache = {};
+        executables = [];
+        calc = null;
+        gc();
+    }
+    // The window is destroyed a moment after `mapped` goes false; items it showed are freed after that
+    Timer { id: releaseTimer; interval: 800; onTriggered: root.release() }
     function closed() {
         unmapPending = true;
         if (Object.keys(held).length) unmapTimer.restart();
@@ -304,7 +334,7 @@ Singleton {
     }
 
     function pinnable(i) {
-        return !!i && !i.key.startsWith("menu:") && !["web", "calc", "clip", "cmd", "emoji"].includes(i.kind);
+        return !!i && !i.key.startsWith("menu:") && !["web", "calc", "clip", "cmd", "emoji", "native"].includes(i.kind);
     }
 
     function togglePin(i) {
@@ -447,6 +477,10 @@ Singleton {
         return out;
     }
 
+    function runInTerminal(argv) {
+        launch((Settings.s.terminal ?? ["kitty", "-e"]).concat(argv));
+    }
+
     function runCommand(text) {
         const sh = Quickshell.env("SHELL") || "sh";
         launch((Settings.s.terminal ?? ["kitty", "-e"]).concat([sh, "-ic", text + "; exec " + sh]));
@@ -501,6 +535,48 @@ Singleton {
         return list.map(make);
     }
 
+    // Built-in sources a plugin mounts as a folder ("source": "audio"); they exist only while the window
+    // is open (shell.qml) and report their items here.
+    property var natives: ({})        // source name -> { status, items }
+    property var nativeStatus: ({})   // last status of each, kept while the window is closed
+    property var nativeNames: []      // sources some plugin item asks for
+
+    function setNative(name, status, items) {
+        if (items === undefined) {
+            if (!(name in natives)) return;
+            delete natives[name];
+        } else {
+            natives[name] = { status, items };
+            nativeStatus[name] = status;
+        }
+        natives = Object.assign({}, natives);
+        rebuildTimer.restart();
+    }
+
+    function nativeEntries(p, r, key, ancestors) {
+        const nat = natives[r.source];
+        if (!nat) return [];
+        const chain = [key].concat(ancestors);
+        return nat.items.map((n, idx) => make({
+            key: key + ":" + n.id,
+            ancestors: n.parent ? [key + ":" + n.parent].concat(chain) : chain,
+            order: idx,
+            kind: n.folder ? "folder" : "native",
+            native: true,
+            folder: !!n.folder,
+            group: p.config.name,
+            title: n.title ?? "",
+            status: n.status ?? "",
+            icon: n.icon ?? "",
+            iconType: n.iconType ?? "glyph",
+            keywords: Array.isArray(n.keywords) ? n.keywords.join(" ") : n.keywords ?? "",
+            closes: !!n.close,
+            confirm: !!n.confirm,
+            nosearch: !!n.nosearch,
+            run: n.run
+        }));
+    }
+
     function pluginOf(key) {
         return plugins.find(p => key === "plugin:" + p.pid || key.startsWith("plugin:" + p.pid + ":")) ?? null;
     }
@@ -525,7 +601,13 @@ Singleton {
             const ancestors = [];
             for (let k = parentOf[r.id]; k; k = k === rootKey ? null : parentOf[k.slice(rootKey.length + 1)])
                 ancestors.push(k);
-            out.push(make(pluginEntry(p, r, key, ancestors, order++)));
+            const e = pluginEntry(p, r, key, ancestors, order++);
+            if (r.source) {
+                e.source = r.source;
+                if (nativeStatus[r.source] !== undefined) e.status = nativeStatus[r.source];
+            }
+            out.push(make(e));
+            if (r.source) for (const n of nativeEntries(p, r, key, ancestors)) out.push(n);
         }
         return out;
     }
@@ -552,11 +634,15 @@ Singleton {
         let list = appItems().concat(powerItems(), filesFolder(), clipboardFolder(), commandFolder(), emojiFolder(), settingsItems());
         for (const p of plugins) list = list.concat(pluginItems(p));
         list = list.concat(menuItems);
+        const set = new Set();
+        for (const p of plugins) for (const r of p.items) if (r.source) set.add(r.source);
+        const names = [...set].sort();
+        if (names.join() !== nativeNames.join()) nativeNames = names;
         const map = {};
         for (const i of list) map[i.key] = i;
         all = list;
         byKey = map;
-        if (shown) refresh(true);
+        if (shown || opening || mapped) refresh(true);
     }
 
     // ------------------------------------------------------------------ search
@@ -619,6 +705,7 @@ Singleton {
         const scored = [];
         for (const i of all) {
             if (f ? !i.ancestors.includes(f.key) : i.ancestors.some(a => a.startsWith("menu:"))) continue;
+            if (i.nosearch && f?.key !== i.ancestors[0]) continue;
             const fields = [[i.nTitle, 1], [i.nKeywords, 0.7, 700]];   // descriptions: word starts only
             let s = Fuzzy.scoreFields(q, fields);
             if (alt !== q) s = Math.max(s, 0.97 * Fuzzy.scoreFields(alt, fields));
@@ -1023,14 +1110,8 @@ Singleton {
         if (!item?.folder) return false;
         savedQuery[item.key] = query;
         stack = stack.filter(k => !k.startsWith("menu:")).concat([item.key]);
-        pluginOf(item.key)?.list(2);   // statuses are what a folder is opened for
-        if (item.key === "files") {
-            Files.open();
-            Files.search([""]);
-        }
-        if (item.key === "clipboard") Clipboard.load();
-        if (item.key === "command" && !pathProc.running) pathProc.running = true;
-        if (item.key === "emoji") Emoji.load();
+        if (!item.native && !item.source) pluginOf(item.key)?.list(2);   // statuses are what a folder is opened for
+        loadFolder(item.key);
         query = "";
         refresh(false);
         return true;
@@ -1105,6 +1186,10 @@ Singleton {
             break;
         case "calc":
             Quickshell.execDetached(["wl-copy", "--", item.title]);
+            break;
+        case "native":
+            item.run?.();
+            if (!item.closes) return;
             break;
         case "plugin":
             runPlugin(item.plugin, item.id, undefined, item.title, item.key);

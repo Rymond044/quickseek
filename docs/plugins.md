@@ -37,6 +37,29 @@ Prints the whole tree:
 | `parent`   | id of a folder item; without it the item lives in the plugin's root folder     |
 | `folder`   | the item is a folder: Enter opens it instead of running it                     |
 | `close`    | close the window right away when the item is run                               |
+| `source`   | on a folder: the built-in source that fills it (see below)                     |
+
+### Built-in sources
+
+Some folders are better filled by quickseek itself than by a script that shells out on every list: a
+folder item with `"source"` gets its contents from the core, while the plugin still decides where the
+folder sits in the tree, its title, icon and order.
+
+```json
+{"id": "audio", "title": "Sound", "icon": "󰕾", "folder": true, "source": "audio"}
+{"id": "bt", "title": "Bluetooth", "icon": "󰂯", "folder": true, "source": "bluetooth"}
+```
+
+| source      | contents                                                                                       |
+|-------------|------------------------------------------------------------------------------------------------|
+| `audio`     | PipeWire outputs and inputs (Enter makes one the default), volume mute, microphone mute        |
+| `bluetooth` | adapter power, paired devices (connect / disconnect), pairing, forgetting, `bluetui` shortcut  |
+
+The folder's status is the source's own (current output, connected devices). Its items are searchable
+like any nested plugin item: they show up when the query matches or inside the folder. The sources
+exist only while the window is open, so nothing listens to PipeWire or BlueZ in between. An unknown
+source name gives an empty folder. Items of a built-in source are not run through the plugin: `run`
+is never called for them.
 
 ## `run <id>`
 
