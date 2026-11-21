@@ -12,7 +12,10 @@ PanelWindow {
     readonly property int headerHeight: 28
     readonly property int rowHeight: 44
     readonly property int bigRowHeight: 56
-    readonly property int maxListHeight: Settings.s.maxRows * rowHeight + 2 * headerHeight + 12
+    readonly property bool sessionInfo: Engine.folder?.key === "session" && !Engine.prompt
+    readonly property int sessionHeight: sessionInfo ? 148 : 0
+    readonly property int maxListHeight: Math.min(Settings.s.maxRows * rowHeight + 2 * headerHeight + 12,
+        Math.max(rowHeight, (screen?.height ?? 900) * 0.8 - barHeight - sessionHeight - 24))
     // Room around the plate for the shadow
     readonly property int pad: Settings.s.shadow ? 28 : 0
     readonly property int plateWidth: Math.min(Settings.s.width, (screen?.width ?? 1000) - 32)
@@ -28,7 +31,7 @@ PanelWindow {
     anchors.top: true
     margins.top: Math.round((screen?.height ?? 900) * 0.2) - pad
     implicitWidth: plateWidth + 2 * pad + 2 * side
-    implicitHeight: barHeight + maxListHeight + 2 + 2 * pad
+    implicitHeight: barHeight + maxListHeight + sessionHeight + 2 + 2 * pad
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
@@ -47,7 +50,7 @@ PanelWindow {
 
     function listHeight() {
         let h = 0;
-        for (const r of Engine.rows) h += r.header ? headerHeight : r.big ? bigRowHeight : rowHeight;
+        for (const r of Engine.rows) h += r.header ? headerHeight : (r.big ? bigRowHeight : rowHeight) + (r.item?.description ? 48 : 0);
         return h ? Math.min(h + 12, maxListHeight) : 0;
     }
 
@@ -69,7 +72,7 @@ PanelWindow {
         x: win.pad + win.side
         y: win.pad
         width: win.plateWidth
-        height: win.barHeight + win.listHeight()
+        height: win.barHeight + win.listHeight() + win.sessionHeight
         // A pill while there is only the search field, like Spotlight
         radius: Engine.rows.length ? 22 : win.barHeight / 2
         Behavior on radius { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
@@ -118,10 +121,59 @@ PanelWindow {
         }
 
         Results {
-            anchors { left: parent.left; right: parent.right; top: bar.bottom; bottom: parent.bottom; topMargin: 2; bottomMargin: 8 }
+            anchors { left: parent.left; right: parent.right; top: bar.bottom; bottom: sessionCard.top; topMargin: 2; bottomMargin: 8 }
             headerHeight: win.headerHeight
             rowHeight: win.rowHeight
             bigRowHeight: win.bigRowHeight
+        }
+
+        Rectangle {
+            id: sessionCard
+            visible: win.sessionInfo
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 12; rightMargin: 12; bottomMargin: 8 }
+            height: win.sessionHeight ? win.sessionHeight - 8 : 0
+            radius: 14
+            color: Theme.surface
+            border.width: 1
+            border.color: Theme.border
+
+            Text {
+                id: infoHeading
+                anchors { left: parent.left; top: parent.top; leftMargin: 14; topMargin: 10 }
+                text: (Quickshell.env("USER") ? Quickshell.env("USER") + " · " : "") + "System info"
+                color: Theme.foreground
+                font { family: Settings.textFont; pointSize: Settings.s.fonts.size; weight: Font.DemiBold }
+            }
+            Column {
+                anchors { left: parent.left; right: parent.right; top: infoHeading.bottom; leftMargin: 14; rightMargin: 14; topMargin: 8 }
+                spacing: 4
+                Repeater {
+                    model: SystemInfo.values()
+                    Item {
+                        required property var modelData
+                        width: parent.width
+                        height: 19
+                        Text {
+                            anchors { left: parent.left; right: metric.left; rightMargin: 12 }
+                            text: modelData[1]
+                            color: Theme.dim
+                            elide: Text.ElideRight
+                            font { family: Settings.textFont; pointSize: Settings.s.fonts.size - 1 }
+                        }
+                        Text {
+                            id: metric
+                            anchors.right: parent.right
+                            text: modelData[2]
+                            color: Theme.foreground
+                            font { family: Settings.textFont; pointSize: Settings.s.fonts.size - 1 }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: Engine.copyText(modelData[2])
+                        }
+                    }
+                }
+            }
         }
     }
 

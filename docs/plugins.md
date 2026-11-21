@@ -31,6 +31,7 @@ Prints the whole tree:
 |------------|--------------------------------------------------------------------------------|
 | `id`       | string, unique within the plugin, passed back to `run`                         |
 | `title`    | the text that is searched and shown                                            |
+| `description` | optional plain-text detail below the title, up to two visible lines; keep full text available through an action |
 | `status`   | short state on the right (`on`, `connected`, `72 %`). Keep it short            |
 | `icon`     | a glyph (Nerd Font) or, with `"iconType": "theme"`, an icon theme name         |
 | `keywords` | extra words to match (string or array)                                         |

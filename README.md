@@ -6,6 +6,9 @@ web search, in a small animated window.
 
 <p align="center"><img src="docs/media/demo.webp" width="736" alt="quickseek: apps, calculator, wrong layout, web, a plugin folder"></p>
 
+- Browse every visible desktop app alphabetically in **Applications**, with the same hiding and actions as search.
+- **System info** shows time since boot (including suspend), boot date, awake time (excluding suspend), and graphical session duration (including suspend). The same four values appear in one information card below the actions in **Session** (click a value to copy). Unavailable session information is shown explicitly. Values refresh once a minute while visible; nothing polls after closing. Requires Python 3; session detection uses `loginctl` and `date`.
+- **Help** lists current prefixes, shortcuts, examples and connected plugins. Its hints are searchable only after entering Help. Search for any of these folders or pin one with Ctrl+P.
 - Results grouped like a desktop spotlight: top hit, then Applications, plugin groups, Web.
 - Files and folders in your home after the `f` prefix (`f report`), from a private `plocate` index
   plus a live look at Downloads, Desktop and Documents.
@@ -60,7 +63,7 @@ hl.bind("SUPER + ALT + Space", hl.dsp.global("quickseek:toggle"))
 or the classic config: `bind = SUPER ALT, Space, global, quickseek:toggle`.
 
 IPC: `qs -p ~/Apps/quickseek ipc call quickseek toggle|open|close`, `… folder plugin:<id>`,
-`… folder files|clipboard|command|emoji|session`, `… search <text>`. For scripts and tests: `… rows`
+`… folder applications|system-info|help|files|clipboard|command|emoji|session`, `… search <text>`. For scripts and tests: `… rows`
 prints what the window shows, `… key esc|down|ctrl+o|…` presses a key, `… type <text>` sets the query.
 
 Under uwsm, start the daemon with `uwsm app -s b -- qs -p ~/Apps/quickseek -n` and set
@@ -70,11 +73,13 @@ Under uwsm, start the daemon with `uwsm app -s b -- qs -p ~/Apps/quickseek -n` a
 
 | key                           | action                                      |
 |-------------------------------|---------------------------------------------|
-| ↑ ↓, Ctrl+K Ctrl+J            | move                                        |
+| ↑ ↓, Ctrl+K Ctrl+J Ctrl+N     | move (wrap at both ends)                                        |
 | Enter                         | run / open folder                           |
 | Alt+Enter                     | show a file in its folder                   |
 | → at the end of the query, Ctrl+O | actions for the selected result         |
-| Space after ↑ ↓               | preview the selected file or clipboard entry |
+| Ctrl+Space while typing / Space in navigation | preview the selected file or clipboard entry |
+| j / k in navigation          | move down / up                              |
+| / in navigation, click search field | return to typing                     |
 | Ctrl+P                        | pin / unpin                                 |
 | Tab                           | open folder; in `>` complete the command    |
 | `f` + space, `v` + space      | search files / clipboard history only       |
@@ -82,12 +87,16 @@ Under uwsm, start the daemon with `uwsm app -s b -- qs -p ~/Apps/quickseek -n` a
 | Backspace on an empty query   | leave the folder                            |
 | Esc                           | close the preview, leave the folder, menu or prompt; close from the top |
 
+Up/down arrows or Ctrl+J / Ctrl+K enter navigation mode (shown as **NAV**). In that mode the search field is read-only: j/k (о/л in the Russian layout) move through the list and Space previews. `/` returns to typing without inserting a slash; clicking the search field also returns. While typing, j/k and Space remain ordinary text, and Ctrl+Space toggles preview.
+
 The window stays mapped until every key pressed in it is released, so nothing typed into quickseek
 ends up in the window below.
 
 Restart, Shut down and Log out ask for a second Enter.
 
 ## Files
+
+Filename wildcards work in file search: `f *.rs`, `f part?.rs`, `f part[12].rs`, or `f main *.rs`. Patterns match the basename, case-insensitively, and can be combined with ordinary words. `*` matches any sequence, `?` one character, and brackets a character class (`[!12]` excludes 1 and 2). Ordinary queries keep fuzzy ranking.
 
 Files are searched only after the prefix: type `f`, a space and the name (`f invoice`). The prefix turns
 into a "Find files ›" chip; Backspace on an empty query leaves it. `а` (the same key in the Russian

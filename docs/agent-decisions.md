@@ -214,3 +214,65 @@
       Не проверено: connect/pair/forget BT на реальном адаптере, смена выхода звука (агент менял только вход и вернул).
 - Проверка: открытие мгновенное и плавное на всех 3 мониторах (включая вертикальный DP-1); `цфддзфзук` находит то же,
   что `wallpaper`; пункты подменю CC видны только внутри раздела или по поиску; в простое 0 % CPU и нет пробуждений.
+
+
+## 2026-11-21 — System info, Applications, Help and circular navigation
+
+Agreed with the owner: four copyable metrics in System info and at the top of Session,
+above Lock/Suspend/Log out: elapsed since boot (including suspend), boot date, awake time
+(excluding suspend), graphical session duration (including suspend). A missing or unverifiable
+logind session is explicitly unavailable. One shared source; sample on demand and once a minute
+while metrics are visible, no timer after closing. Python 3 helper uses Linux clocks and logind.
+Applications browses existing visible desktop entries alphabetically; searching, hiding, launching
+and actions reuse the current app source. Help shows configured prefixes, examples, keyboard
+navigation and plugin descriptions. Optional plugin row `description` adds two lines below a title.
+Up/down and their existing Ctrl aliases wrap globally, skipping headers and handling empty lists.
+Dotfiles status is an external plugin owned by dotfiles: manual Refresh checks, a dated persisted
+report, drill-down and copying detail. Reading the list never runs checks. No repair actions.
+The empty screen stays configurable as before. Showing section shortcuts on an empty screen is
+an agreed possible future improvement, not implemented now.
+
+Validation: isolated KWin + nested Hyprland with no live output/input access, main window,
+actions menus, nested report, copying metrics, hidden apps in browse/search, empty results,
+headers, both wrap directions and Ctrl aliases. Scale 2 screenshots checked. Helper: four unit
+checks, including sleep accounting and unavailable/wrong session identity. Dotfiles: six report
+checks; all 54 installer tests passed. After closing: 0 CPU ticks and 0 context switches in 5 s.
+An initial comparison used different workloads (new sections versus baseline app search), so its
+RSS values do not establish a memory regression. Real physical keys and a new suspend/resume
+cycle were not exercised. Real logind helper returned all four values on the owner's host.
+
+
+## 2026-11-21 — Help scope, Session card and navigation mode
+
+Owner refinement supersedes the earlier Session layout: Help hints (including plugin descriptions)
+are visible/searchable only inside Help. The Help folder itself remains globally searchable.
+Session keeps only power actions in its selectable list, followed by one non-selectable information
+card with all four metrics; clicking a value copies it. The separate System info folder remains.
+Up/down and Ctrl+J/Ctrl+K enter navigation mode. Existing circular behavior is preserved; j/k then
+move down/up, and Space previews. Before navigation j/k and Space type normally; Ctrl+Space toggles
+preview in typing mode. The search field is read-only in navigation with a NAV indicator. Slash
+returns to typing without inserting a slash and closes preview, as does clicking the search field.
+Prompt input is not made read-only and does not interpret plain j/k as navigation.
+Validated on the isolated compositor at scale 2: Help exclusion from global app/prefix queries,
+search inside Help, Session action-only rows and card screenshot, wrap and Ctrl keys. Temporary
+QtTest event injection exercised actual TextInput key handling and mouse clicks: normal j/k/Space,
+arrow/Ctrl entry, navigation j/k, both preview shortcuts, slash and click return. The driver was
+removed before applying; no QtTest dependency was added to production. No physical input or
+real power action was exercised. Test processes were stopped.
+
+
+## 2026-11-21 — File wildcards and Russian NAV keys
+
+File search accepts basename globs (*, ?, character classes and negated classes), alongside plain
+words, without changing ordinary fuzzy queries. Two causes were reproduced: the shell expanded
+unquoted query globs against the helper cwd, and fuzzy scoring discarded the remaining wildcard
+results. The helper now disables pathname expansion; ranking uses raw basename patterns for glob
+queries, including pinned/live/indexed candidates. No index timer or background work was added.
+NAV j/k also recognizes о/л from the existing keyboard-layout mapping. SearchBar passes event text
+and the engine falls back to the Qt key for synthetic events; typing outside NAV is unchanged.
+Dotfiles status now supplies icons for every folder/timestamp via its own external plugin.
+Validation: 7 quickseek regression tests (real fd/plocate index with conflicting cwd, actual JS
+matcher and Engine handler, clocks); dotfiles 55 tests (including missing icons). Isolated UI
+with real index confirmed *.rs, part?.rs, part[12].rs and * through ranking; Qt Cyrillic key events
+and IPC о/л navigated both ways across the wrap. Root and child status icons checked visually.
+Temporary event drivers removed. Test compositors stopped; no real power action exercised.

@@ -46,7 +46,7 @@ ListView {
         readonly property bool selected: index === Engine.sel
 
         width: list.width
-        height: !item ? list.headerHeight : big ? list.bigRowHeight : list.rowHeight
+        height: !item ? list.headerHeight : (big ? list.bigRowHeight : list.rowHeight) + (item.description ? 48 : 0)
 
         Text {
             visible: !row.item
@@ -133,9 +133,11 @@ ListView {
             }
 
             Text {
+                id: title
                 anchors { left: icon.right; leftMargin: 12; right: status.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
                 elide: Text.ElideRight
                 textFormat: Text.StyledText
+                anchors.verticalCenterOffset: row.item?.description ? -24 : 0
                 text: (row.modelData.crumb ? `<font color="${Theme.dim}">${list.esc(row.modelData.crumb)}  ›  </font>` : "")
                     + list.esc(row.item?.title ?? "")
                 color: Theme.foreground
@@ -145,6 +147,18 @@ ListView {
                     weight: row.big ? Font.DemiBold : Font.Normal
                 }
             }
+            Text {
+                visible: !!row.item?.description
+                anchors { left: title.left; right: parent.right; rightMargin: 14; top: title.bottom; topMargin: 3 }
+                text: row.item?.description ?? ""
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                color: Theme.dim
+                font { family: Settings.textFont; pointSize: Settings.s.fonts.size }
+            }
+
         }
 
         MouseArea {

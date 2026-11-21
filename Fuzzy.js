@@ -81,3 +81,50 @@ function scoreFields(query, fields) {
     if (tokens.length > 1 && fields.length && fields[0][0].includes(query)) s += 80;
     return s;
 }
+
+// Plain j/k and their Russian keyboard positions are navigation only in NAV mode.
+function navigationLetter(text) {
+    const lower = text.toLowerCase();
+    return /[а-яё]/.test(lower) ? swapLayout(lower) : lower;
+}
+
+function hasFilePattern(query) {
+    return /[*?\[]/.test(query);
+}
+
+// Match basename globs without normalizing away dots, brackets or punctuation.
+function filePatternScore(query, name) {
+    const tokens = query.toLowerCase().trim().split(/\s+/).filter(t => t);
+    const target = name.toLowerCase();
+    if (!tokens.length) return 0;
+    const escape = c => /[\\^$.*+?()[\]{}|]/.test(c) ? "\\" + c : c;
+    for (const token of tokens) {
+        if (!hasFilePattern(token)) {
+            if (!target.includes(token)) return 0;
+            continue;
+        }
+        let pattern = "^";
+        for (let i = 0; i < token.length; i++) {
+            const c = token[i];
+            if (c === "*") {
+                if (token[i - 1] !== "*") pattern += ".*";
+            } else if (c === "?") pattern += ".";
+            else if (c === "[") {
+                const end = token.indexOf("]", i + 1);
+                if (end > i + 1) {
+                    let cls = token.slice(i + 1, end).replace(/\\/g, "\\\\");
+                    if (cls[0] === "!") cls = "^" + cls.slice(1);
+                    else if (cls[0] === "^") cls = "\\" + cls;
+                    pattern += "[" + cls + "]";
+                    i = end;
+                } else pattern += "\\[";
+            } else pattern += escape(c);
+        }
+        try {
+            if (!new RegExp(pattern + "$", "i").test(target)) return 0;
+        } catch (e) {
+            if (!target.includes(token)) return 0;
+        }
+    }
+    return 800;
+}

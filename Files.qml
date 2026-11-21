@@ -40,7 +40,7 @@ Singleton {
         const key = queries.join("\n");
         if (!enabled || key === pending) return;
         pending = key;
-        if (!queries.some(q => q.replace(/^\./, "").length >= 2)) {
+        if (!queries.some(q => q.replace(/^\./, "").length >= 2 || /[*?]/.test(q))) {
             searchTimer.stop();
             searchProc.running = false;
             found = [];

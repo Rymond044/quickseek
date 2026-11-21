@@ -7,7 +7,7 @@
 # Needs fd and plocate. Skipped: hidden paths (a shallow index of them is used for queries that
 # start with a dot), .cache, Trash, Steam, node_modules, .git, and anything in
 # ~/.config/quickseek/ignore (gitignore syntax).
-set -u
+set -uf
 
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/quickseek
 ignore=${XDG_CONFIG_HOME:-$HOME/.config}/quickseek/ignore
@@ -67,7 +67,7 @@ search() {
     for q in "$@"; do
         db=$cache/files.db
         case $q in .*) [ -e "$cache/dot.db" ] && db=$db:$cache/dot.db ;; esac
-        # shellcheck disable=SC2086 # one word per pattern
+        # shellcheck disable=SC2086 # Split words; set -f leaves globs for plocate, never the cwd.
         plocate -d "$db" -i -b -l "$limit" -- $q 2>/dev/null
     done | awk '!seen[$0]++' | mark
 }

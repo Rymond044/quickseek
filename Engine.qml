@@ -47,7 +47,10 @@ Singleton {
 
     // ------------------------------------------------------------------ window
 
+    property bool infoLoaded: false
+
     function open(folderKey) {
+        infoLoaded = false;
         query = "";
         listMode = false;
         previewOpen = false;
@@ -115,6 +118,7 @@ Singleton {
 
     // Folders that read data on demand; the data is dropped again when the window is gone
     function loadFolder(key) {
+        if (key === "system-info" || key === "session") requestInfo();
         if (key === "files") {
             Files.open();
             Files.search([""]);
@@ -253,6 +257,63 @@ Singleton {
         return out;
     }
 
+    function requestInfo() {
+        if (infoLoaded) return;
+        infoLoaded = true;
+        SystemInfo.load();
+    }
+
+    Binding {
+        target: SystemInfo
+        property: "active"
+        value: root.shown && (["system-info", "session"].includes(root.folder?.key)
+            || root.rows.some(r => r.item?.kind === "info" && r.item?.metric))
+    }
+    Connections {
+        target: SystemInfo
+        function onUpdated() { root.rebuild(); }
+    }
+
+    function discoveryItems() {
+        const out = [];
+        const folderItem = (key, title, keywords) => make({ key, title, keywords, kind: "folder", folder: true,
+            group: "quickseek", icon: key === "applications" ? "\uf00a" : key === "help" ? "\uf059" : "\uf05a", iconType: "glyph" });
+        out.push(folderItem("applications", "Applications", "all apps programs browse приложения"));
+        out.push(folderItem("system-info", "System info", "uptime boot awake session system information система"));
+        out.push(folderItem("help", "Help", "quickseek help shortcuts prefixes guide помощь справка"));
+        const info = (parent, key, title, status, keywords, order, metric) => make({
+            key: parent + ":" + key, kind: "info", group: "quickseek", ancestors: [parent], title, status: parent === "help" ? "" : status,
+            description: parent === "help" ? status : "", value: status,
+            keywords, order, metric: !!metric, nosearch: parent === "help", icon: "\uf05a", iconType: "glyph"
+        });
+        const values = SystemInfo.values();
+        for (const parent of ["system-info"])
+            values.forEach((v, n) => out.push(info(parent, v[0], v[1], v[2], v[3], -100 + n, true)));
+        out.push(make({ key: "system-info:copy", title: "Copy summary", kind: "setting", group: "quickseek",
+            ancestors: ["system-info"], order: 10, icon: "\uf0c5", iconType: "glyph",
+            run: () => copyText(SystemInfo.values().map(v => v[1] + ": " + v[2]).join("\n")) }));
+        const help = [
+            ["Applications", "Browse all apps; Enter launches", "apps programs"],
+            ["Find files", Files.enabled ? (Files.prefix || "Find files") + " report — search files" : "Disabled in settings", "files documents prefix"],
+            ["Clipboard history", Clipboard.available ? (Clipboard.prefix || "Clipboard history") + " text — search clipboard" : "Clipboard unavailable", "clipboard prefix paste"],
+            ["Emoji", Emoji.enabled ? Emoji.prefix + "fire — copy an emoji" : "Disabled in settings", "emoji prefix"],
+            ["Run command", commandPrefix ? commandPrefix + " ls — run in terminal" : "Disabled in settings", "terminal shell prefix"],
+            ["Calculator", "144 / 12; 5 km to mi; Enter copies", "math units currency"],
+            ["Web search", Object.entries(engines).map(([k, v]) => k + " query (" + v.name + ")").join("; "), "web internet prefixes"],
+            ["Move through results", "↑ / ↓, Ctrl+K / Ctrl+J; then j / k; wraps at both ends", "keys navigation circular"],
+            ["Open and go back", "Enter / Tab opens; Esc goes back; Backspace leaves an empty folder", "keys folders escape"],
+            ["Actions and preview", "→ at end / Ctrl+O: actions; Ctrl+Space while typing; Space in navigation: preview", "keys actions preview"],
+            ["Return to typing", "/ in navigation or click the search field", "navigation input search mode"],
+            ["Pin a result", "Ctrl+P; pinned items can appear on the empty screen", "keys favorites pinned"],
+            ["System info and Session", "Boot, awake and graphical session times; Enter copies", "uptime sleep session"],
+            ["Settings", "Search quickseek settings to customize", "settings configuration"]
+        ];
+        help.forEach((v, n) => out.push(info("help", "topic-" + n, v[0], v[1], v[2], n, false)));
+        for (const p of plugins) out.push(info("help", "plugin-" + p.pid, p.config.name ?? p.pid,
+            p.config.description ?? "Connected plugin · " + (p.config.keywords ?? ""), "plugin " + p.pid, 100, false));
+        return out;
+    }
+
     // ---- files
 
     property var fileCache: ({})   // key -> item, cleared on open
@@ -334,7 +395,7 @@ Singleton {
     }
 
     function pinnable(i) {
-        return !!i && !i.key.startsWith("menu:") && !["web", "calc", "clip", "cmd", "emoji", "native"].includes(i.kind);
+        return !!i && !i.key.startsWith("menu:") && !["web", "calc", "clip", "cmd", "emoji", "native", "info"].includes(i.kind);
     }
 
     function togglePin(i) {
@@ -620,6 +681,7 @@ Singleton {
             group: p.config.name,
             title: r.title ?? "",
             status: r.status ?? "",
+            description: r.description ?? "",
             icon: r.icon ?? "",
             iconType: r.iconType ?? "glyph",
             keywords: Array.isArray(r.keywords) ? r.keywords.join(" ") : r.keywords ?? "",
@@ -631,7 +693,7 @@ Singleton {
     }
 
     function rebuild() {
-        let list = appItems().concat(powerItems(), filesFolder(), clipboardFolder(), commandFolder(), emojiFolder(), settingsItems());
+        let list = appItems().concat(discoveryItems(), powerItems(), filesFolder(), clipboardFolder(), commandFolder(), emojiFolder(), settingsItems());
         for (const p of plugins) list = list.concat(pluginItems(p));
         list = list.concat(menuItems);
         const set = new Set();
@@ -699,12 +761,14 @@ Singleton {
         if (f?.key === "clipboard") return clipRows(raw, q);
         if (f?.key === "command") return commandRows(query);
         if (f?.key === "emoji") return emojiRows(raw, q);
+        if (f?.key === "applications" && !q)
+            return appItems().sort((a, b) => a.title.localeCompare(b.title) || a.key.localeCompare(b.key)).map(item => ({ item }));
         if (!q) return f ? childrenOf(f).map(item => ({ item })) : emptyRows();
 
         const alt = Fuzzy.normalize(Fuzzy.swapLayout(raw));
         const scored = [];
         for (const i of all) {
-            if (f ? !i.ancestors.includes(f.key) : i.ancestors.some(a => a.startsWith("menu:"))) continue;
+            if (f ? !(f.key === "applications" ? i.kind === "app" : i.ancestors.includes(f.key)) : i.ancestors.some(a => a.startsWith("menu:"))) continue;
             if (i.nosearch && f?.key !== i.ancestors[0]) continue;
             const fields = [[i.nTitle, 1], [i.nKeywords, 0.7, 700]];   // descriptions: word starts only
             let s = Fuzzy.scoreFields(q, fields);
@@ -764,7 +828,7 @@ Singleton {
     // Files: below other results of the same score, deeper ones lower. Pinned files always
     // take part; the index only when `all`
     function scoreFiles(raw, q, alt, scored, all) {
-        if (q.length < 2) return;
+        if (q.length < 2 && !Fuzzy.hasFilePattern(raw)) return;
         const key = fileQueries(raw).join("\n");
         const dotQuery = raw.trim().startsWith(".");
         const seen = {};
@@ -779,8 +843,13 @@ Singleton {
             seen[i.key] = true;
             if (!dotQuery && i.path.includes("/.")) continue;
             const fields = [[i.nTitle, 1], [i.nKeywords, 0.9, 700]];
-            let s = Fuzzy.scoreFields(q, fields);
-            if (alt !== q) s = Math.max(s, 0.97 * Fuzzy.scoreFields(alt, fields));
+            let s;
+            if (Fuzzy.hasFilePattern(raw)) {
+                s = Math.max(...fileQueries(raw).map(pattern => Fuzzy.filePatternScore(pattern, i.title)));
+            } else {
+                s = Fuzzy.scoreFields(q, fields);
+                if (alt !== q) s = Math.max(s, 0.97 * Fuzzy.scoreFields(alt, fields));
+            }
             if (s <= 0) continue;
             // A whole-name match deep in a project tree loses to a word match in ~ or ~/Downloads
             s = 0.9 * Math.min(s, 850) - Math.min(15 * (i.depth - 1), 150) + History.frecency(i.key) + History.memory(i.key, q);
@@ -825,6 +894,7 @@ Singleton {
             q = pf.rest;
         }
         query = q;
+        if (!folder && /uptime|boot|awake|session|system info/i.test(q)) requestInfo();
         // The field still shows the prefix when the query itself did not change (">" typed first)
         if (pf) queryReplaced();
         confirmKey = "";
@@ -855,10 +925,20 @@ Singleton {
     // ------------------------------------------------------------------ keys
 
     // Keys of the search field; true = handled. `atEnd`: the text cursor is at the end.
-    function onKey(k, mods, atEnd, empty) {
+    function onKey(k, mods, atEnd, empty, text) {
         const ctrl = mods & Qt.ControlModifier;
         if (!shown) return true;   // closing: swallow everything until the window is gone
-        if (k === Qt.Key_Space && !mods && listMode && !prompt && previewable(current)) {
+        if (!prompt && listMode && !mods && k === Qt.Key_Slash) {
+            leaveNavigation();
+            return true;
+        }
+        const nav = Fuzzy.navigationLetter(text || String.fromCharCode(k));
+        if (!prompt && listMode && !mods && (nav === "j" || nav === "k")) {
+            move(nav === "j" ? 1 : -1);
+            return true;
+        }
+        if (k === Qt.Key_Space && !prompt && ((ctrl && !listMode) || (!mods && listMode))) {
+            if (!previewable(current)) return true;
             previewOpen = !previewOpen;
             return true;
         }
@@ -888,16 +968,23 @@ Singleton {
         return true;
     }
 
+    signal inputRequested()
+    function leaveNavigation() {
+        listMode = false;
+        previewOpen = false;
+        inputRequested();
+    }
+
     // The same from IPC, for scripts and tests: "esc", "down", "ctrl+o", "alt+enter"…
     function pressKey(name) {
         const keys = { esc: Qt.Key_Escape, tab: Qt.Key_Tab, enter: Qt.Key_Return, up: Qt.Key_Up, down: Qt.Key_Down,
-            left: Qt.Key_Left, right: Qt.Key_Right, space: Qt.Key_Space, backspace: Qt.Key_Backspace };
+            left: Qt.Key_Left, right: Qt.Key_Right, space: Qt.Key_Space, backspace: Qt.Key_Backspace, slash: Qt.Key_Slash };
         const parts = name.toLowerCase().split("+");
         const last = parts.pop();
         let mods = 0;
         for (const m of parts) mods |= m === "ctrl" ? Qt.ControlModifier : m === "alt" ? Qt.AltModifier : m === "shift" ? Qt.ShiftModifier : 0;
         const k = keys[last] ?? (last.length === 1 ? last.toUpperCase().charCodeAt(0) : 0);
-        return onKey(k, mods, true, !query);
+        return onKey(k, mods, true, !query, last.length === 1 ? last : "");
     }
 
     // ------------------------------------------------------------------ actions menu
@@ -1095,9 +1182,11 @@ Singleton {
     function move(d) {
         listMode = true;
         if (!rows.length) return;
-        let i = sel;
-        do i += d; while (i >= 0 && i < rows.length && !rows[i].item);
-        if (i >= 0 && i < rows.length) select(i);
+        let i = sel < 0 ? (d > 0 ? -1 : 0) : sel;
+        for (let n = 0; n < rows.length; n++) {
+            i = (i + d + rows.length) % rows.length;
+            if (rows[i].item) { select(i); return; }
+        }
     }
 
     function select(i) {
@@ -1170,6 +1259,9 @@ Singleton {
             if (alt) showInFolder(item.path);
             else openPath(item.path);
             break;
+        case "info":
+            copyText(item.value ?? item.status ?? item.title);
+            return;
         case "setting":
             item.run?.();
             if (!item.closes) return;

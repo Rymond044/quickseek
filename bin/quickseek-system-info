@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Read Linux clocks and the current graphical logind session without a daemon."""
+import json
+import os
+import subprocess
+import time
+
+
+def snapshot():
+    boot = time.clock_gettime(time.CLOCK_BOOTTIME)
+    awake = time.clock_gettime(time.CLOCK_MONOTONIC)
+    result = dict(elapsed=boot, awake=awake, bootTime=time.time() - boot, session=None)
+    session = os.environ.get('XDG_SESSION_ID')
+    if not session:
+        return result
+    try:
+        proc = subprocess.run(['loginctl', 'show-session', session, '-p', 'Type', '-p', 'Class',
+                               '-p', 'Timestamp', '-p', 'User'],
+                              capture_output=True, text=True, timeout=2, check=True, env={**os.environ, 'LC_ALL': 'C'})
+        props = dict(line.split('=', 1) for line in proc.stdout.splitlines() if '=' in line)
+        stamp = float(subprocess.run(['date', '-d', props.get('Timestamp', ''), '+%s'],
+                                     capture_output=True, text=True, timeout=2, check=True).stdout)
+        if (props.get('Type') in ('wayland', 'x11') and props.get('Class') == 'user'
+                and props.get('User') == str(os.getuid()) and 0 < stamp <= time.time()):
+            result['session'] = time.time() - stamp
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return result
+
+
+if __name__ == '__main__':
+    print(json.dumps(snapshot()))

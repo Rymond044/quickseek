@@ -42,8 +42,13 @@ Item {
 
     TextInput {
         id: input
-        anchors { left: chipRow.right; leftMargin: 12; right: parent.right; rightMargin: 18; verticalCenter: parent.verticalCenter }
+        anchors { left: chipRow.right; leftMargin: 12; right: parent.right; rightMargin: Engine.listMode ? 66 : 18; verticalCenter: parent.verticalCenter }
         focus: true
+        readOnly: Engine.listMode && !Engine.prompt
+        cursorVisible: activeFocus && !Engine.listMode
+        TapHandler {
+            onPressedChanged: if (pressed) Engine.leaveNavigation()
+        }
         color: Theme.foreground
         selectionColor: Theme.selection
         selectedTextColor: Theme.onSelection
@@ -57,6 +62,7 @@ Item {
         onTextChanged: Engine.fieldText = text
         Connections {
             target: Engine
+            function onInputRequested() { input.forceActiveFocus(); }
             function onQueryChanged() { if (input.text !== Engine.query) input.text = Engine.query; }
             function onQueryReplaced() { if (input.text !== Engine.query) input.text = Engine.query; }
             function onTypeRequested(t) { input.text = t; Engine.setQuery(t); }
@@ -65,17 +71,25 @@ Item {
         Keys.onReleased: e => Engine.keyUp(e.key)
         Keys.onPressed: e => {
             if (!e.isAutoRepeat) Engine.keyDown(e.key);
-            e.accepted = Engine.onKey(e.key, e.modifiers, cursorPosition === text.length, !text);
+            e.accepted = Engine.onKey(e.key, e.modifiers, cursorPosition === text.length, !text, e.text);
         }
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
             visible: !input.text
-            text: Engine.prompt ? (Engine.prompt.message || Engine.prompt.title) : Engine.folder ? "Search in " + Engine.folder.title + "…" : "Search…"
+            text: Engine.prompt ? (Engine.prompt.message || Engine.prompt.title) : Engine.listMode ? "Navigate · / to search" : Engine.folder ? "Search in " + Engine.folder.title + "…" : "Search…"
             color: Theme.faint
             font: input.font
             elide: Text.ElideRight
             width: input.width
         }
     }
+    Text {
+        visible: Engine.listMode && !Engine.prompt
+        anchors { right: parent.right; rightMargin: 18; verticalCenter: parent.verticalCenter }
+        text: "NAV"
+        color: Theme.accent
+        font { family: Settings.textFont; pointSize: Settings.s.fonts.size - 1; weight: Font.DemiBold }
+    }
+
 }
